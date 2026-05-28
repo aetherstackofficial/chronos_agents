@@ -57,9 +57,12 @@ cd chronos-agents
 
 3. **Install Dependencies:**
 
-   pip install -r requirements.txt
+   # Navigate to the orchestrator directory where the requirements file lives
+   cd swarm_orchestrator
+
+   python -m pip install -r requirements.txt
    # OR install manually:
-   pip install pyzmq stable-baselines3[extra] gymnasium pandas numpy python-dotenv google-genai
+   python -m pip install pyzmq stable-baselines3[extra] gymnasium pandas numpy python-dotenv google-genai
 
 4. **Configure Environment Variables:**
 

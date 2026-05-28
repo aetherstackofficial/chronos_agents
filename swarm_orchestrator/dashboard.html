@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chronos Digital Twin</title>
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0b0e14; --panel-bg: #131722; --border-color: #2a2e39;
+            --text-main: #d1d4dc; --text-muted: #787b86;
+            --up-color: #26a69a; --down-color: #ef5350;
+            --up-bg: rgba(38, 166, 154, 0.1); --down-bg: rgba(239, 83, 80, 0.1);
+        }
+        body { margin: 0; padding: 10px; background-color: var(--bg-dark); color: var(--text-main); font-family: sans-serif; display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: auto 500px 300px; gap: 10px; height: 100vh; box-sizing: border-box; }
+        .panel { background-color: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; }
+        .header-bar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 4px; flex-wrap: wrap; gap: 15px; }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        .controls input, .controls select { background-color: var(--bg-dark); color: var(--text-main); border: 1px solid var(--border-color); padding: 8px; border-radius: 4px; }
+        .controls button { background-color: #2962ff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        .controls button.stop { background-color: var(--down-color); }
+        .controls button.inject { background-color: #ff9800; color: #000; }
+        .stat-box { display: flex; gap: 20px; font-size: 14px; align-items: center; }
+        .stat-val { font-weight: bold; font-family: monospace; font-size: 16px; }
+        .panel-title { padding: 10px 15px; font-size: 14px; font-weight: bold; color: var(--text-muted); border-bottom: 1px solid var(--border-color); text-transform: uppercase; }
+        #chart-container { flex: 1; width: 100%; position: relative; }
+        .order-book-container { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+        .ob-header { display: flex; justify-content: space-between; padding: 5px 15px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border-color); }
+        .ob-rows { flex: 1; overflow-y: auto; padding: 5px 0; font-family: monospace; font-size: 13px; }
+        .ob-row { display: flex; justify-content: space-between; padding: 2px 15px; position: relative; }
+        .ob-row span { z-index: 1; }
+        .depth-bar { position: absolute; top: 0; bottom: 0; right: 0; z-index: 0; }
+        .ask-row .depth-bar { background-color: var(--down-bg); }
+        .bid-row .depth-bar { background-color: var(--up-bg); }
+        .ask-price { color: var(--down-color); }
+        .bid-price { color: var(--up-color); }
+        .spread-row { text-align: center; padding: 8px 0; font-size: 14px; border-top: 1px dashed var(--border-color); border-bottom: 1px dashed var(--border-color); margin: 5px 0; font-family: monospace; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { text-align: left; padding: 8px 15px; color: var(--text-muted); font-weight: normal; border-bottom: 1px solid var(--border-color); position: sticky; top: 0; background: var(--panel-bg); }
+        td { padding: 6px 15px; border-bottom: 1px solid rgba(42, 46, 57, 0.5); font-family: monospace; }
+        .positive { color: var(--up-color); }
+        .negative { color: var(--down-color); }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <div style="font-weight: bold; font-size: 18px; display: flex; align-items: center; gap: 10px;">
+            <div style="width: 12px; height: 12px; background: var(--up-color); border-radius: 50%; box-shadow: 0 0 8px var(--up-color);"></div>
+            CHRONOS ENGINE
+        </div>
+        <div class="controls">
+            <input type="text" id="stock-name" placeholder="Symbol" value="TCS" style="width: 70px;">
+            <input type="number" id="init-price" placeholder="Init Price" value="190.00" style="width: 80px;">
+            <select id="sim-sector">
+                <option value="TECH">TECH</option>
+                <option value="DEFENSE">DEFENSE</option>
+                <option value="PHARMA">PHARMA</option>
+                <option value="OIL">OIL / ENERGY</option>
+            </select>
+            <button id="btn-toggle" onclick="toggleSimulation()">START SIMULATION</button>
+            <button class="stop" onclick="resetSimulation()">RESET</button>
+        </div>
+        <div class="controls" style="border-left: 1px solid var(--border-color); padding-left: 15px;">
+            <input type="text" id="manual-news" placeholder="Enter Breaking News..." style="width: 300px;">
+            <button class="inject" onclick="injectNews()">INJECT NEWS</button>
+        </div>
+        <div class="stat-box">
+            <div>DAY: <span id="day-header" class="stat-val" style="color: #ff9800;">1</span></div>
+            <div>TIME: <span id="market-time-header" class="stat-val" style="color: #ff9800;">09:15</span></div>
+            <div>PRICE: <span id="current-price-header" class="stat-val">$0.00</span></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">Asset Price & Volume</div>
+        <div id="chart-container"></div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">Limit Order Book</div>
+        <div class="order-book-container">
+            <div class="ob-header"><span>Price</span><span>Size</span></div>
+            <div id="ob-asks" class="ob-rows" style="display: flex; flex-direction: column-reverse;"></div>
+            <div id="ob-spread" class="spread-row">SPREAD: $0.00</div>
+            <div id="ob-bids" class="ob-rows"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">Live Agent PnL Leaderboard</div>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>Agent ID</th><th>Type</th><th>Net PnL</th><th>Inventory</th></tr></thead>
+                <tbody id="leaderboard-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-title">Tape (Recent Trades)</div>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>Time</th><th>Price</th><th>Size</th><th>Buyer</th><th>Seller</th></tr></thead>
+                <tbody id="trades-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const chartProperties = { layout: { background: { type: 'solid', color: '#131722' }, textColor: '#d1d4dc' }, grid: { vertLines: { color: '#2a2e39' }, horzLines: { color: '#2a2e39' } }, crosshair: { mode: LightweightCharts.CrosshairMode.Normal }, rightPriceScale: { borderColor: '#2a2e39' }, timeScale: { borderColor: '#2a2e39', timeVisible: true, secondsVisible: false } };
+        const chart = LightweightCharts.createChart(document.getElementById('chart-container'), chartProperties);
+        const candleSeries = chart.addCandlestickSeries({ upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350' });
+        
+        // FIX: The proper way to force volume to the bottom 20% of the chart
+        const volumeSeries = chart.addHistogramSeries({
+            priceFormat: { type: 'volume' },
+            priceScaleId: '', 
+        });
+        chart.priceScale('').applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+        });
+
+        window.addEventListener('resize', () => { chart.applyOptions({ width: document.getElementById('chart-container').clientWidth, height: document.getElementById('chart-container').clientHeight }); });
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+
+        const socket = io({ transports: ['polling', 'websocket'] });
+        let isRunning = false;
+        let lastKnownPrice = 0;
+
+        const formatMoney = (num) => '$' + parseFloat(num).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        socket.on('sim_update', function (data) {
+            // FIX: Use the engine's true simulated UNIX time, don't guess it!
+            const tickTime = data.unix_time; 
+            
+            const dateObj = new Date(tickTime * 1000);
+            const hours = String(dateObj.getUTCHours()).padStart(2, '0');
+            const minutes = String(dateObj.getUTCMinutes()).padStart(2, '0');
+            
+            document.getElementById('market-time-header').innerText = `${hours}:${minutes}`;
+            document.getElementById('day-header').innerText = data.day_count;
+
+            lastKnownPrice = data.ohlc.close;
+            document.getElementById('current-price-header').innerText = formatMoney(lastKnownPrice);
+            
+            candleSeries.update({ time: tickTime, open: data.ohlc.open, high: data.ohlc.high, low: data.ohlc.low, close: data.ohlc.close });
+            volumeSeries.update({ time: tickTime, value: data.step_volume, color: data.ohlc.close >= data.ohlc.open ? 'rgba(38, 166, 154, 0.4)' : 'rgba(239, 83, 80, 0.4)' });
+
+            document.getElementById('ob-spread').innerText = `SPREAD: ${formatMoney(data.book.spread)}`;
+            const maxBookSize = 5000; 
+            document.getElementById('ob-asks').innerHTML = data.book.asks.slice().reverse().map(a => `<div class="ob-row ask-row"><div class="depth-bar" style="width: ${Math.min(100, (a.size/maxBookSize)*100)}%"></div><span class="ask-price">${a.price.toFixed(2)}</span><span>${a.size}</span></div>`).join('');
+            document.getElementById('ob-bids').innerHTML = data.book.bids.map(b => `<div class="ob-row bid-row"><div class="depth-bar" style="width: ${Math.min(100, (b.size/maxBookSize)*100)}%"></div><span class="bid-price">${b.price.toFixed(2)}</span><span>${b.size}</span></div>`).join('');
+
+            const tradesBody = document.getElementById('trades-body');
+            data.trades.forEach(t => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td style="color:var(--text-muted)">${t.time}</td><td class="${Math.random() > 0.5 ? 'positive' : 'negative'}">${t.price.toFixed(2)}</td><td>${t.size}</td><td>${t.buyer}</td><td>${t.seller}</td>`;
+                tradesBody.prepend(tr);
+            });
+            while (tradesBody.children.length > 50) tradesBody.removeChild(tradesBody.lastChild);
+
+            document.getElementById('leaderboard-body').innerHTML = data.agents.map(a => `<tr><td>${a.id}</td><td style="color:var(--text-muted)">${a.type}</td><td class="${a.pnl >= 0 ? 'positive' : 'negative'}">${a.pnl > 0 ? '+' : ''}${formatMoney(a.pnl)}</td><td class="${a.pos >= 0 ? 'positive' : 'negative'}">${a.pos}</td></tr>`).join('');
+        });
+
+        function toggleSimulation() {
+            const btn = document.getElementById('btn-toggle');
+            if (isRunning) {
+                socket.emit('stop_sim');
+                btn.innerText = "START SIMULATION";
+                btn.style.backgroundColor = "#2962ff";
+            } else {
+                const stockName = document.getElementById('stock-name').value;
+                const startPrice = document.getElementById('init-price').value;
+                const sector = document.getElementById('sim-sector').value;
+                socket.emit('start_sim', { stock_name: stockName, start_price: startPrice, sector: sector });
+                btn.innerText = "PAUSE SIMULATION";
+                btn.style.backgroundColor = "var(--text-muted)";
+            }
+            isRunning = !isRunning;
+        }
+
+        function injectNews() {
+            if (!isRunning) { alert("Please start the simulation first!"); return; }
+            const newsInput = document.getElementById('manual-news');
+            const newsText = newsInput.value.trim();
+            if (newsText) {
+                socket.emit('inject_news', { headline: newsText, sector: document.getElementById('sim-sector').value, current_price: lastKnownPrice });
+                newsInput.value = ""; 
+            }
+        }
+
+        function resetSimulation() {
+            socket.emit('stop_sim');
+            isRunning = false;
+            document.getElementById('btn-toggle').innerText = "START SIMULATION";
+            document.getElementById('btn-toggle').style.backgroundColor = "#2962ff";
+            candleSeries.setData([]);
+            volumeSeries.setData([]); 
+            document.getElementById('trades-body').innerHTML = '';
+            document.getElementById('ob-asks').innerHTML = '';
+            document.getElementById('ob-bids').innerHTML = '';
+            document.getElementById('leaderboard-body').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
