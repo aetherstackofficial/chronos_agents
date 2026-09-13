@@ -1,0 +1,6 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY swarm_orchestrator/requirements.txt .
+RUN pip install -r requirements.txt torch stable-baselines3
+COPY swarm_orchestrator/ .
+CMD ["python", "main.py"]

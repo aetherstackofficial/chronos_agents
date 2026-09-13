@@ -1,32 +1,67 @@
+import os
 import zmq
-import threading
+import zmq.asyncio
+import asyncio
 import random
 import logging
-from flask import Flask, render_template_string
-from flask_socketio import SocketIO
+import json
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
+import uvicorn
+from contextlib import asynccontextmanager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [BRIDGE] - %(message)s')
 
-app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
-context = zmq.Context()
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
 
-engine_socket = context.socket(zmq.REQ)
-engine_socket.connect("tcp://127.0.0.1:5555")
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
 
-oracle_socket = context.socket(zmq.REQ)
-oracle_socket.connect("tcp://127.0.0.1:5557")
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
 
+    async def broadcast(self, message: dict):
+        dead_connections = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logging.error(f"Error broadcasting: {e}")
+                dead_connections.append(connection)
+                
+        for dead in dead_connections:
+            try:
+                self.active_connections.remove(dead)
+            except ValueError:
+                pass
+
+manager = ConnectionManager()
 sim_running = False
-last_close = None  
+last_close = None
 
-def background_state_fetcher():
+# ZMQ Setup
+context = zmq.asyncio.Context()
+engine_socket = context.socket(zmq.REQ)
+# Fetch from environment
+zmq_host = os.getenv("ZMQ_HOST", "127.0.0.1")
+zmq_port = os.getenv("ZMQ_ORDER_PORT", "5555")
+engine_socket.connect(f"tcp://{zmq_host}:{zmq_port}")
+
+oracle_host = os.getenv("ORACLE_HOST", "127.0.0.1" if zmq_host == "127.0.0.1" else "oracle")
+oracle_socket = context.socket(zmq.REQ)
+oracle_socket.connect(f"tcp://{oracle_host}:5557")
+
+async def background_state_fetcher():
     global sim_running, last_close
     while True:
         if sim_running:
             try:
-                engine_socket.send_json({"action": "FETCH_STATE"})
-                state = engine_socket.recv_json()
+                await engine_socket.send_json({"action": "FETCH_STATE"})
+                state = await engine_socket.recv_json()
                 
                 current_price = float(state.get("current_price", 0.0))
                 if last_close is None:
@@ -44,9 +79,10 @@ def background_state_fetcher():
                 jitter_low = random.uniform(0.01, 0.05 + volatility)
                 
                 ui_payload = {
-                    "unix_time": state.get("unix_time"),      # FIX: Exact engine time
-                    "day_count": state.get("day_count", 1),   # FIX: Track the day
-                    "step_volume": state.get("step_volume", 0), # FIX: Passes volume to Chart
+                    "type": "sim_update",
+                    "unix_time": state.get("unix_time"),
+                    "day_count": state.get("day_count", 1),
+                    "step_volume": state.get("step_volume", 0),
                     "ohlc": {
                         "open": last_close,
                         "high": max(last_close, current_price) + jitter_high, 
@@ -62,45 +98,73 @@ def background_state_fetcher():
                     "agents": state.get("agents", [])  
                 }
                 
-                socketio.emit('sim_update', ui_payload)
+                await manager.broadcast(ui_payload)
                 last_close = current_price 
                 
             except Exception as e:
                 logging.error(f"Error fetching state: {e}")
         
-        socketio.sleep(1)
+        await asyncio.sleep(0.05)
 
-@app.route('/')
-def index():
-    with open('dashboard.html', 'r') as f:
-        return render_template_string(f.read())
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Setup zmq asyncio context for non-blocking if needed, but we'll run fetcher as a task
+    task = asyncio.create_task(background_state_fetcher())
+    yield
+    task.cancel()
+    engine_socket.close()
+    oracle_socket.close()
+    context.term()
 
-@socketio.on('start_sim')
-def handle_start(data):
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/")
+async def get():
+    return HTMLResponse("Backend is running")
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
     global sim_running, last_close
-    sim_running = True
-    last_close = float(data.get("start_price", 190.0)) 
     try:
-        engine_socket.send_json({
-            "action": "INIT_SIM",
-            "stock": data.get("stock_name", "TCS"),
-            "sector": data.get("sector", "TECH"),
-            "price": last_close
-        })
-        engine_socket.recv_json()
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            action = message.get("action")
+            
+            if action == "start_sim":
+                sim_running = True
+                last_close = float(message.get("start_price", 190.0))
+                try:
+                    await engine_socket.send_json({
+                        "action": "INIT_SIM",
+                        "stock": message.get("stock_name", "TCS"),
+                        "sector": message.get("sector", "TECH"),
+                        "price": last_close
+                    })
+                    await engine_socket.recv_json()
+                except Exception as e:
+                    logging.error(f"Failed to initialize Engine: {e}")
+                    
+            elif action == "stop_sim":
+                sim_running = False
+                try:
+                    await engine_socket.send_json({"action": "STOP_SIM"})
+                    await engine_socket.recv_json()
+                except Exception as e:
+                    logging.error(f"Failed to stop Engine: {e}")
+                
+            elif action == "inject_news":
+                await oracle_socket.send_json({
+                    "headline": message.get("headline")
+                })
+                await oracle_socket.recv_json()
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
     except Exception as e:
-        logging.error(f"Failed to initialize Engine: {e}")
-
-@socketio.on('stop_sim')
-def handle_stop():
-    global sim_running
-    sim_running = False
-
-@socketio.on('inject_news')
-def handle_news(data):
-    oracle_socket.send_json(data)
-    oracle_socket.recv_json()
+        logging.error(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
 
 if __name__ == '__main__':
-    threading.Thread(target=background_state_fetcher, daemon=True).start()
-    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    uvicorn.run("bridge:app", host="0.0.0.0", port=8000, reload=False)

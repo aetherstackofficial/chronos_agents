@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chronos Project - Interview Revision Guide</title>
+    <style>
+        :root {
+            --bg-color: #f4f7f6;
+            --text-color: #333;
+            --primary-color: #2c3e50;
+            --accent-color: #e74c3c;
+            --code-bg: #ecf0f1;
+            --border-color: #bdc3c7;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: var(--bg-color);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1000px;
+            margin: auto;
+            background: #fff;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1, h2, h3 {
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+        h3 {
+            border-bottom: 1px solid var(--border-color);
+        }
+        p { margin-bottom: 15px; }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .qa-box {
+            background-color: #f9f9f9;
+            border-left: 4px solid var(--accent-color);
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .qa-q {
+            font-weight: bold;
+            color: var(--accent-color);
+            margin-top: 0;
+        }
+        ul { margin-bottom: 20px; }
+        li { margin-bottom: 8px; }
+        code {
+            background-color: var(--code-bg);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        .cv-section {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        .cv-section h2 { color: white; border-color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Project Chronos: Interview Revision Guide</h1>
+        <p>This document contains everything we have covered so far regarding your contribution to the Distributed Market Digital Twin project. Use this for quick revision before interviews.</p>
+
+        <h2>1. Project Overview & Architecture</h2>
+        <p><strong>What it is:</strong> A simulated stock market ecosystem where AI agents and algorithmic bots trade against each other in real-time.<br>
+        <strong>Problem Solved:</strong> Traditional backtesting uses static historical data. Chronos creates a living, reactive market where massive trades actually move the price and trigger other bots.</p>
+        
+        <h3>Architecture (Distributed Microservices)</h3>
+        <ul>
+            <li><strong>The Server Node (The Engine) <span class="highlight">[YOUR CONTRIBUTION]</span>:</strong> Runs <code>true_engine.py</code>. The central Limit Order Book listening on TCP Port 5555 via ZeroMQ.</li>
+            <li><strong>The Client Node (The Swarm):</strong> 100 PyTorch agents requesting data and sending orders.</li>
+            <li><strong>The Oracle Node (The LLM) <span class="highlight">[YOUR CONTRIBUTION]</span>:</strong> Runs <code>oracle.py</code>. Connects to Google Gemini API to inject macro shocks.</li>
+            <li><strong>The UI Bridge Node <span class="highlight">[YOUR CONTRIBUTION]</span>:</strong> Runs <code>bridge.py</code> and <code>dashboard.html</code>. Uses Flask and Socket.IO to stream data to the frontend.</li>
+        </ul>
+
+        <h2>2. Deep Dive: Key Technical Questions</h2>
+        
+        <div class="qa-box">
+            <p class="qa-q">Q1: How does the Macro Oracle handle Good vs. Bad News?</p>
+            <p><strong>Answer:</strong> The Oracle sends the headline, stock name, and price to Google Gemini. Gemini scores it between -1.0 (Catastrophe) and 1.0 (Euphoria). If the score is positive (e.g., +0.8 for good news), the Oracle sets the action to "BUY" and calculates a massive block of shares to purchase. It dumps this into the engine, driving the price up (Green Profit). If negative, it dumps shares, driving the price down.</p>
+        </div>
+
+        <div class="qa-box">
+            <p class="qa-q">Q2: Who are the 100 Agents?</p>
+            <p><strong>Answer:</strong> 15 Market Makers (High-frequency, profit on spread), 4 Institutional Whales (Smart money, trade in huge blocks), and 80 Retail Traders (Rule-based, chaotic, trade on RSI indicators. Liquidated and respawned if bankrupt).</p>
+        </div>
+
+        <div class="qa-box">
+            <p class="qa-q">Q3: ZeroMQ vs HTTP: What is Brokerless TCP?</p>
+            <p><strong>Answer:</strong> HTTP has heavy headers and is slow (Request-Response only). ZeroMQ uses raw TCP sockets for pure, high-speed binary messaging. "Brokerless" means there is no middleman server (like Kafka/RabbitMQ); scripts talk Peer-to-Peer, allowing the engine to handle 1,200+ passes/sec.</p>
+        </div>
+
+        <div class="qa-box">
+            <p class="qa-q">Q4: How does the Limit Order Book work in the Engine?</p>
+            <p><strong>Answer:</strong> The True Engine uses standard Python Dictionaries (<code>self.bids</code> and <code>self.asks</code>). Bids are buyers, Asks are sellers. Key is the price, value is a list of orders. The payload sends Timestamp, Price, VWAP, RSI, and the top 5 levels of the book to the agents.</p>
+        </div>
+
+        <div class="qa-box">
+            <p class="qa-q">Q5: What are WebSockets and Socket.IO doing?</p>
+            <p><strong>Answer:</strong> WebSockets keep a permanent, two-way TCP connection open. Instead of the browser asking for data every second (HTTP Polling), a background thread in Flask asks the Engine for data via ZeroMQ, and pushes it instantly to the browser via <code>socketio.emit()</code>.</p>
+        </div>
+
+        <div class="qa-box">
+            <p class="qa-q">Q6: What happens if an Agent's Limit Order doesn't match instantly?</p>
+            <p><strong>Answer:</strong> It sits in the dictionary (Order Book). However, a pruning mechanism runs every second (<code>apply_market_regime_physics</code>). If the current price drifts $0.50 away from the order, the order is deleted from the book to prevent RAM bloat and keep the engine fast.</p>
+        </div>
+
+        <h2>3. Tech Stack Deep Dive</h2>
+        <ul>
+            <li><strong>Python (Core Logic):</strong> Used for rapid development and ML compatibility. Bypassed the GIL limitation by using a microservices pattern (multiple processes) instead of native threads. Used <code>asyncio</code> for non-blocking agent requests.</li>
+            <li><strong>ZeroMQ (Networking):</strong> Chosen over REST APIs for ultra-low latency, brokerless Peer-to-Peer communication using raw TCP sockets.</li>
+            <li><strong>Flask & Socket.IO (Bridge):</strong> Chosen over Django because a micro-framework was perfect for a single-page app serving real-time WebSocket data.</li>
+            <li><strong>HTML/JS & Lightweight Charts:</strong> React's Virtual DOM or standard SVG charts (Chart.js) lag under high-frequency data. Lightweight Charts uses HTML5 <code>&lt;canvas&gt;</code> rendering via GPU for 60fps performance.</li>
+            <li><strong>Google Gemini API:</strong> Chosen over traditional NLP (VADER) because LLMs understand complex financial irony and context, rather than just simple keyword counting.</li>
+        </ul>
+
+        <h2>4. Complete Execution Workflow</h2>
+        <ol>
+            <li><strong>Initialization:</strong> Engine, Swarm, Oracle, and UI run in separate terminals.</li>
+            <li><strong>User Request:</strong> User clicks "Start". Browser sends WebSocket event to Flask. Flask sends ZeroMQ command to Engine to reset.</li>
+            <li><strong>Market Loop:</strong> Agents request LOB state via ZeroMQ. They process data and send BUY/SELL orders.</li>
+            <li><strong>Execution:</strong> Engine matches orders natively in Python dictionaries, updates balances, and calculates new VWAP/RSI.</li>
+            <li><strong>Data Broadcasting:</strong> Flask background thread pulls state from Engine every second and emits it to the Browser via WebSocket.</li>
+            <li><strong>Macro Shock:</strong> User injects news -> Oracle asks Gemini for score -> Oracle sends massive dump order to Engine -> Engine clears book and gaps the price.</li>
+        </ol>
+
+        <div class="cv-section">
+            <h2>📝 CV Content to Copy/Paste</h2>
+            <p><strong>Chronos - Distributed Market Digital Twin</strong></p>
+            <ul>
+                <li>Architected a high-frequency <strong>Limit Order Book</strong> matching engine in <strong>Python</strong>, leveraging <strong>ZeroMQ</strong> for brokerless TCP communication to process 1,200+ concurrent algorithmic agent requests per second.</li>
+                <li>Developed an autonomous Macro Oracle using the <strong>Google Gemini API</strong> to parse simulated breaking news, calculate financial sentiment, and dynamically inject macro-economic shocks into the ecosystem.</li>
+                <li>Built a real-time monitoring dashboard using <strong>Flask</strong>, <strong>Socket.IO</strong> (WebSockets), and <strong>Lightweight Charts</strong> to stream and visualize live market data, order flow, and agent PnL without browser lag.</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

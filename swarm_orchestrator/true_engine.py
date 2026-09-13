@@ -31,6 +31,7 @@ class MatchingEngine:
         
         self.recent_volume = 10000.0 * self.u_shape_multiplier
         self.price_history = [self.current_price] * 15 
+        self.is_paused = True
         
     def initialize_sim(self, stock, sector, price):
         self.share_name = stock
@@ -49,6 +50,7 @@ class MatchingEngine:
         self.sim_unix_time = 1767258900
         self.u_shape_multiplier = 2.5
         self.recent_volume = 10000.0 * self.u_shape_multiplier
+        self.is_paused = False
         logging.warning(f"=== ENGINE RESET: {self.share_name} | Starting @ ${self.current_price} | DAY 1, 09:15 AM ===")
 
     def _get_agent(self, agent_id):
@@ -285,7 +287,7 @@ class MatchingEngine:
 def run_true_engine():
     context = zmq.Context()
     socket = context.socket(zmq.REP)
-    socket.bind(f"tcp://{os.getenv('ZMQ_HOST', '127.0.0.1')}:{os.getenv('ZMQ_ORDER_PORT', '5555')}")
+    socket.bind(f"tcp://0.0.0.0:{os.getenv('ZMQ_ORDER_PORT', '5555')}")
 
     poller = zmq.Poller()
     poller.register(socket, zmq.POLLIN)
@@ -308,7 +310,14 @@ def run_true_engine():
                 elif message.get("action") == "INIT_SIM":
                     engine.initialize_sim(message.get("stock", "TCS"), message.get("sector", "TECH"), message.get("price", 190.0))
                     socket.send_json({"status": "ENGINE_READY"})
+                elif message.get("action") == "STOP_SIM":
+                    engine.is_paused = True
+                    socket.send_json({"status": "PAUSED"})
                 else:
+                    if engine.is_paused and message.get("action") in ["BUY", "SELL"]:
+                        socket.send_json({"status": "PAUSED", "executed_qty": 0, "average_price": 0})
+                        continue
+
                     agent_id = message.get("agent_id", "UNKNOWN")
                     action = message.get("action")
                     order_type = message.get("type", "MARKET")
@@ -330,10 +339,11 @@ def run_true_engine():
 
             elapsed = time.time() - start_time
             if elapsed >= 1.0:
-                engine.apply_market_regime_physics()
-                
-                if total_requests > 0:
-                    logging.info(f"{engine.share_name} | Price=${engine.current_price:.2f} | Vol={int(engine.recent_volume * engine.u_shape_multiplier)} | TICK={engine.market_minute}/375")
+                if not getattr(engine, 'is_paused', True):
+                    engine.apply_market_regime_physics()
+                    
+                    if total_requests > 0:
+                        logging.info(f"{engine.share_name} | Price=${engine.current_price:.2f} | Vol={int(engine.recent_volume * engine.u_shape_multiplier)} | TICK={engine.market_minute}/375")
                 total_requests = 0
                 start_time = time.time()
 

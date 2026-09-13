@@ -1,4 +1,15 @@
+# Python
 venv/
 __pycache__/
 *.pyc
+
+# Node
+node_modules/
+dist/
+build/
+
+# Environments
+.env
+*.env
+.env.*
 swarm_orchestrator/.env

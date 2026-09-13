@@ -1,0 +1,7 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY swarm_orchestrator/requirements.txt .
+RUN pip install -r requirements.txt
+COPY swarm_orchestrator/ .
+EXPOSE 5555
+CMD ["python", "true_engine.py"]

@@ -65,6 +65,17 @@ def score_news_sentiment(headline, stock_name, current_price):
 
     except Exception as e:
         logging.warning(f"Gemini API Error or JSON Parsing Failed: {e}")
+        logging.info("Falling back to local heuristic keyword matching...")
+        
+        headline_lower = headline.lower()
+        crash_words = ['breach', 'fraud', 'crash', 'scandal', 'ban', 'banned', 'resign', 'plummet', 'investigation']
+        surge_words = ['record', 'profit', 'acquire', 'surge', 'breakthrough', 'partnership', 'moon', 'soar']
+        
+        if any(word in headline_lower for word in crash_words):
+            return -0.85  # Simulate severe negative news
+        elif any(word in headline_lower for word in surge_words):
+            return 0.85   # Simulate severe positive news
+            
         return 0.0
 
 def execute_oracle_trade(engine_socket, sentiment_score, current_price):

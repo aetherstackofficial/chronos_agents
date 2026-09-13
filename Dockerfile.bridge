@@ -1,0 +1,7 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY swarm_orchestrator/requirements.txt .
+RUN pip install -r requirements.txt
+COPY swarm_orchestrator/ .
+EXPOSE 8000
+CMD ["uvicorn", "bridge:app", "--host", "0.0.0.0", "--port", "8000"]
