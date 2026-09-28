@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "AI bots kaise decide karte hain",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      640
+    ],
+    "legend": {
+      "entries": {
+        "emphasis": {
+          "label": "main flow"
+        },
+        "default": {
+          "label": "data / orders"
+        },
+        "security": {
+          "label": "attacker orders"
+        },
+        "dashed": {
+          "label": "side input"
+        }
+      }
+    }
+  },
+  "stages": [
+    {
+      "label": "Engine se input"
+    },
+    {
+      "label": "Kaun jaagega"
+    },
+    {
+      "label": "6 numbers"
+    },
+    {
+      "label": "Bot ka dimaag"
+    },
+    {
+      "label": "Order bhejna"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "tick",
+      "type": "messagebus",
+      "label": "Tick",
+      "sublabel": "PUB :5556 · 1/sec",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "event",
+      "type": "messagebus",
+      "label": "Event",
+      "sublabel": "news · liquidation",
+      "stage": 0,
+      "row": 3
+    },
+    {
+      "id": "gate",
+      "type": "backend",
+      "label": "Wake / Sleep",
+      "sublabel": "loop_manager.py",
+      "tag": "30% · news par 100%",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "features",
+      "type": "backend",
+      "label": "Observation",
+      "sublabel": "features.py",
+      "tag": "6 numbers",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "mm",
+      "type": "backend",
+      "label": "15 Market Makers",
+      "sublabel": "PPO model",
+      "tag": "2 LIMIT quotes",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "whale",
+      "type": "backend",
+      "label": "4 Whales",
+      "sublabel": "PPO model",
+      "tag": "MARKET · target pos",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "retail",
+      "type": "backend",
+      "label": "80 Retail",
+      "sublabel": "rules, no ML",
+      "tag": "MARKET · 1–100 sh",
+      "stage": 3,
+      "row": 2
+    },
+    {
+      "id": "redteam",
+      "type": "security",
+      "label": "Red-Team",
+      "sublabel": "optional attacker",
+      "tag": "MARKET · fade/sweep",
+      "stage": 3,
+      "row": 3
+    },
+    {
+      "id": "gateway",
+      "type": "messagebus",
+      "label": "Order Gateway",
+      "sublabel": "DEALER pool",
+      "tag": "sab ek saath",
+      "stage": 4,
+      "row": 1
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Matching Engine",
+      "sublabel": "ROUTER :5555",
+      "stage": 4,
+      "row": 3
+    }
+  ],
+  "flows": [
+    {
+      "id": "tick-in",
+      "from": "tick",
+      "to": "gate",
+      "label": "har tick",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "news-in",
+      "from": "event",
+      "to": "gate",
+      "label": "news → 60 tick jaago",
+      "variant": "dashed"
+    },
+    {
+      "id": "awake",
+      "from": "gate",
+      "to": "features",
+      "label": "jaage bots",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "to-mm",
+      "from": "features",
+      "to": "mm",
+      "label": "obs",
+      "labelSegment": 2
+    },
+    {
+      "id": "to-whale",
+      "from": "features",
+      "to": "whale",
+      "variant": "emphasis",
+      "route": "straight",
+      "label": "obs",
+      "labelAt": [
+        664,
+        271
+      ]
+    },
+    {
+      "id": "to-retail",
+      "from": "features",
+      "to": "retail",
+      "label": "obs",
+      "labelSegment": 2
+    },
+    {
+      "id": "to-red",
+      "from": "gate",
+      "to": "redteam",
+      "label": "raw tick",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          315,
+          499
+        ]
+      ]
+    },
+    {
+      "id": "mm-out",
+      "from": "mm",
+      "to": "gateway",
+      "label": "LIMIT",
+      "labelSegment": 0
+    },
+    {
+      "id": "whale-out",
+      "from": "whale",
+      "to": "gateway",
+      "variant": "emphasis",
+      "route": "straight",
+      "label": "MARKET",
+      "labelAt": [
+        826,
+        271
+      ]
+    },
+    {
+      "id": "retail-out",
+      "from": "retail",
+      "to": "gateway",
+      "label": "MARKET",
+      "labelSegment": 0
+    },
+    {
+      "id": "red-out",
+      "from": "redteam",
+      "to": "gateway",
+      "variant": "security",
+      "label": "MARKET",
+      "labelSegment": 0
+    },
+    {
+      "id": "send",
+      "from": "gateway",
+      "to": "engine",
+      "label": "ORDER",
+      "variant": "emphasis",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "6 numbers",
+      "items": [
+        "VWAP doori · volatility · volume ratio · RSI · OFI · apni position",
+        "Training aur live dono build_observation() use karte",
+        "Quiet: ~30% bots jaagte; news par 60 tick tak 100%"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Kaun kya karta",
+      "items": [
+        "MM (PPO): bid/ask doori 2–50 bps + size → 2 LIMIT quotes",
+        "Whale (PPO): target position → MARKET, max 10,000",
+        "Retail: RSI<30 buy, >70 sell; OFI ±0.8 FOMO/panic; 10% random"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Red-Team + ledger",
+      "items": [
+        "Red-Team default off (--role redteam): crowd ke khilaaf, patli book sweep",
+        "Cash/pos engine ke ACK se — bots khud nahi ginte",
+        "Retail < ₹1,000 → engine ₹50k reset"
+      ]
+    }
+  ]
+}

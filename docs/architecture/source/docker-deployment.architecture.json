@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Docker Compose deployment",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1100,
+      660
+    ],
+    "repository": {
+      "url": "https://github.com/the-steelix-flame/chronos",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "84947702191e8cc2eedf846701cee3c5146a5d1d"
+    }
+  },
+  "components": [
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "frontend",
+      "sublabel": "React + nginx · :3000",
+      "brand": "docker",
+      "pos": [
+        280,
+        90
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "Dockerfile.frontend",
+          "label": "nginx serve"
+        }
+      ]
+    },
+    {
+      "id": "oracle",
+      "type": "backend",
+      "label": "oracle",
+      "sublabel": "News Scorer · :5557",
+      "brand": "docker",
+      "pos": [
+        580,
+        90
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "Dockerfile.oracle",
+          "label": "python oracle.py"
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "external",
+      "label": "Google Gemini",
+      "sublabel": "internet",
+      "brand": "google-gemini",
+      "pos": [
+        880,
+        90
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "you",
+      "type": "external",
+      "label": "Aap (browser)",
+      "sublabel": "localhost",
+      "pos": [
+        30,
+        300
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "bridge",
+      "sublabel": "Web API + full UI · :8000",
+      "brand": "docker",
+      "pos": [
+        280,
+        300
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "Dockerfile.bridge",
+          "label": "uvicorn bridge:app"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "engine",
+      "sublabel": ":5555 orders · :5556 prices",
+      "brand": "docker",
+      "pos": [
+        580,
+        300
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "Dockerfile.engine",
+          "label": "python -m engine.server"
+        }
+      ]
+    },
+    {
+      "id": "volume",
+      "type": "database",
+      "label": "chronos_data",
+      "sublabel": "volume · chronos.db",
+      "pos": [
+        880,
+        300
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "docker-compose.yml",
+          "label": "volumes:"
+        }
+      ]
+    },
+    {
+      "id": "strategy",
+      "type": "security",
+      "label": "Strategy process",
+      "sublabel": "subprocess (no Docker)",
+      "pos": [
+        280,
+        500
+      ],
+      "size": [
+        170,
+        70
+      ]
+    },
+    {
+      "id": "swarm",
+      "type": "backend",
+      "label": "swarm",
+      "sublabel": "99 bots · main.py",
+      "brand": "docker",
+      "pos": [
+        580,
+        500
+      ],
+      "size": [
+        170,
+        70
+      ],
+      "sources": [
+        {
+          "path": "Dockerfile.agents",
+          "label": "python main.py"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Docker Compose network (ek machine)",
+      "wraps": [
+        "frontend",
+        "oracle",
+        "bridge",
+        "engine",
+        "volume",
+        "strategy",
+        "swarm"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "bridge container ke andar",
+      "wraps": [
+        "strategy"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "open",
+      "from": "you",
+      "to": "bridge",
+      "label": ":8000",
+      "variant": "emphasis"
+    },
+    {
+      "id": "zmq",
+      "from": "bridge",
+      "to": "engine",
+      "label": "ZeroMQ",
+      "variant": "emphasis"
+    },
+    {
+      "id": "disk",
+      "from": "engine",
+      "to": "volume",
+      "label": "write",
+      "variant": "emphasis"
+    },
+    {
+      "id": "react",
+      "from": "you",
+      "to": "frontend",
+      "label": ":3000",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "old-ws",
+      "from": "frontend",
+      "to": "bridge",
+      "label": "old protocol",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "news",
+      "from": "bridge",
+      "to": "oracle",
+      "label": "headline",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "shock",
+      "from": "oracle",
+      "to": "engine",
+      "label": "orders",
+      "labelAt": [
+        712,
+        262
+      ]
+    },
+    {
+      "id": "llm",
+      "from": "oracle",
+      "to": "gemini",
+      "label": "API key",
+      "variant": "dashed"
+    },
+    {
+      "id": "spawn",
+      "from": "bridge",
+      "to": "strategy",
+      "label": "spawn",
+      "labelDy": 24
+    },
+    {
+      "id": "strat-orders",
+      "from": "strategy",
+      "to": "engine",
+      "label": "orders",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "bots",
+      "from": "swarm",
+      "to": "engine",
+      "label": "orders"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Kaun kya chalata",
+      "items": [
+        "engine pehle (healthcheck :5555); baaki uska wait karte",
+        "swarm: main.py · oracle: oracle.py · bridge: uvicorn",
+        "frontend React :3000 — full UI bridge :8000 par"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Data kahan",
+      "items": [
+        "Volume: engine chronos.db likhta, bridge padhta",
+        "scripts/results volume par nahi — container reset par gone",
+        ".env image se bahar; key compose env se"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Code se mili kamiyaan",
+      "items": [
+        "GEMINI_API_KEY sirf oracle ko → Copilot/Narrator hamesha fallback",
+        "bridge mein docker CLI nahi → strategy subprocess mein (security nahi)",
+        "FIX Gateway compose mein nahi"
+      ]
+    }
+  ]
+}

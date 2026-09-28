@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "REPLAY → REACTIVE (latch)",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1080,
+      566
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Engine mode (engine.mode)"
+    },
+    {
+      "id": "side",
+      "label": "Beech ke rukne / wapas"
+    }
+  ],
+  "states": [
+    {
+      "id": "replay-start",
+      "type": "start",
+      "label": "REPLAY_START",
+      "sublabel": "CSV load · seed",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "bridge / Time Machine"
+    },
+    {
+      "id": "replay",
+      "type": "active",
+      "label": "REPLAY",
+      "sublabel": "CSV bars chal rahe",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "replay.py"
+    },
+    {
+      "id": "user-fill",
+      "type": "decision",
+      "label": "User ka fill aaya?",
+      "sublabel": "STRAT_ / USER_",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "_apply_fill()"
+    },
+    {
+      "id": "reactive",
+      "type": "active",
+      "label": "REACTIVE",
+      "sublabel": "bots + book = price",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "permanent"
+    },
+    {
+      "id": "saved",
+      "type": "success",
+      "label": "Run saved",
+      "sublabel": "runs/ticks/trades",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "SQLite"
+    },
+    {
+      "id": "not-yet",
+      "type": "neutral",
+      "label": "Abhi nahi",
+      "sublabel": "wapas history par",
+      "lane": "side",
+      "col": 0,
+      "tag": "re-anchor"
+    },
+    {
+      "id": "paused",
+      "type": "waiting",
+      "label": "PAUSED",
+      "sublabel": "clock ruki",
+      "lane": "side",
+      "col": 1,
+      "tag": "PAUSE / RESUME"
+    },
+    {
+      "id": "new-run",
+      "type": "neutral",
+      "label": "Naya run",
+      "sublabel": "INIT / REPLAY",
+      "lane": "side",
+      "col": 2,
+      "tag": "full reset"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "no-fill",
+      "from": "user-fill",
+      "to": "not-yet",
+      "label": "nahi",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "back-to-replay",
+      "from": "not-yet",
+      "to": "replay",
+      "label": "agla tick"
+    },
+    {
+      "id": "pause",
+      "from": "reactive",
+      "to": "paused",
+      "label": "PAUSE",
+      "variant": "dashed",
+      "labelDy": 24,
+      "labelDx": -32
+    },
+    {
+      "id": "resume",
+      "from": "paused",
+      "to": "reactive",
+      "label": "RESUME",
+      "labelDx": 34
+    },
+    {
+      "id": "reset",
+      "from": "saved",
+      "to": "new-run",
+      "label": "reset",
+      "variant": "dashed",
+      "labelDy": 24
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "REPLAY mein",
+      "items": [
+        "replay.py har tick (1 sec = 1 min) CSV ki agli bar chalata hai",
+        "Ghost orders + SIM_LP se asli trades o→h→l→c; RSI/VWAP inhi se",
+        "Bots trade kar sakte hain, par price history par wapas aata hai"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Latch rule",
+      "items": [
+        "Pehla fill jiska buyer/seller STRAT_ ya USER_ ho → REACTIVE",
+        "Permanent; sabko event mode_change jaata hai",
+        "Book, ledgers, RSI carry over — price jump nahi"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Dhyan do",
+      "items": [
+        "INIT_SIM wala LIVE mode kabhi REACTIVE nahi banta",
+        "PAUSE sirf flag hai: clock rukti, tick aata rehta",
+        "Time Machine tapes generated hain, asli data nahi"
+      ]
+    }
+  ]
+}

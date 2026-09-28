@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Ek order ka safar",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      620
+    ],
+    "legend": {
+      "entries": {
+        "security": {
+          "label": "latch event"
+        }
+      }
+    }
+  },
+  "participants": [
+    {
+      "id": "strategy",
+      "type": "security",
+      "label": "Aapka code",
+      "sublabel": "class UserStrategy"
+    },
+    {
+      "id": "sdk",
+      "type": "backend",
+      "label": "Strategy SDK",
+      "sublabel": "runner/sdk.py"
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Matching Engine",
+      "sublabel": "engine/server.py"
+    },
+    {
+      "id": "book",
+      "type": "database",
+      "label": "Order Book",
+      "sublabel": "engine/book.py"
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "Web API",
+      "sublabel": "bridge.py :8000"
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Dashboard",
+      "sublabel": "browser"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 255,
+      "label": "1 · Har second ek tick"
+    },
+    {
+      "from": 265,
+      "to": 420,
+      "label": "2 · Order match"
+    },
+    {
+      "from": 430,
+      "to": 560,
+      "label": "3 · Result wapas"
+    }
+  ],
+  "messages": [
+    {
+      "id": "tick-to-sdk",
+      "from": "engine",
+      "to": "sdk",
+      "y": 165,
+      "label": "tick snapshot (PUB :5556)",
+      "variant": "default"
+    },
+    {
+      "id": "on-tick",
+      "from": "sdk",
+      "to": "strategy",
+      "y": 197,
+      "label": "on_tick(state)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "orders-back",
+      "from": "strategy",
+      "to": "sdk",
+      "y": 230,
+      "label": "orders list",
+      "variant": "return"
+    },
+    {
+      "id": "send-order",
+      "from": "sdk",
+      "to": "engine",
+      "y": 282,
+      "label": "ORDER STRAT_xxxx (:5555)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "match",
+      "from": "engine",
+      "to": "book",
+      "y": 312,
+      "label": "price-time match",
+      "variant": "emphasis"
+    },
+    {
+      "id": "fills",
+      "from": "book",
+      "to": "engine",
+      "y": 342,
+      "label": "fills",
+      "variant": "return"
+    },
+    {
+      "id": "trade-print",
+      "from": "engine",
+      "to": "bridge",
+      "y": 374,
+      "label": "trade print (PUB)",
+      "variant": "default"
+    },
+    {
+      "id": "latch-event",
+      "from": "engine",
+      "to": "bridge",
+      "y": 404,
+      "label": "mode_change → REACTIVE",
+      "variant": "security"
+    },
+    {
+      "id": "ack",
+      "from": "engine",
+      "to": "sdk",
+      "y": 442,
+      "label": "ACK: FILLED + cash/pos",
+      "variant": "return"
+    },
+    {
+      "id": "on-fill",
+      "from": "sdk",
+      "to": "strategy",
+      "y": 472,
+      "label": "on_fill(ack)",
+      "variant": "default"
+    },
+    {
+      "id": "next-tick",
+      "from": "engine",
+      "to": "bridge",
+      "y": 506,
+      "label": "next tick (new price)",
+      "variant": "default"
+    },
+    {
+      "id": "ws-push",
+      "from": "bridge",
+      "to": "browser",
+      "y": 536,
+      "label": "WebSocket /ws push",
+      "variant": "emphasis"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "sdk",
+      "from": 160,
+      "to": 478,
+      "type": "backend"
+    },
+    {
+      "participant": "strategy",
+      "from": 192,
+      "to": 236,
+      "type": "security"
+    },
+    {
+      "participant": "engine",
+      "from": 277,
+      "to": 511,
+      "type": "backend"
+    },
+    {
+      "participant": "book",
+      "from": 307,
+      "to": 348,
+      "type": "database"
+    },
+    {
+      "participant": "bridge",
+      "from": 369,
+      "to": 542,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Step-by-step",
+      "items": [
+        "Engine har 1 sec (= 1 market min) tick bhejta: price, book, RSI, VWAP, OFI",
+        "SDK on_tick(state) chalata; aap orders list return karte ho",
+        "Max 5 orders/tick; agent_id = STRAT_ + 8 hex"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Engine andar",
+      "items": [
+        "Price-time match; khud se trade nahi",
+        "Har fill: cash/pos transfer + last_price update",
+        "REPLAY mein pehla STRAT_ fill → REACTIVE"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Result wapas",
+      "items": [
+        "ACK sirf sender ko: final cash/pos (yahi sach)",
+        "trade/tick/event sabko; bridge → WebSocket → browser",
+        "ResultsStore STRAT_ trades se P&L + CSV/PDF"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Extra Tools — idea se report tak",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1210,
+      650
+    ],
+    "repository": {
+      "url": "https://github.com/the-steelix-flame/chronos",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "84947702191e8cc2eedf846701cee3c5146a5d1d"
+    }
+  },
+  "components": [
+    {
+      "id": "narrator",
+      "type": "backend",
+      "label": "Narrator",
+      "sublabel": "market kyun hila",
+      "pos": [
+        290,
+        90
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/features/narrator.py",
+          "label": "narrate()"
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "type": "external",
+      "label": "Google Gemini",
+      "sublabel": "internet LLM",
+      "brand": "google-gemini",
+      "pos": [
+        530,
+        90
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Dashboard",
+      "sublabel": "Lab / Copilot views",
+      "pos": [
+        50,
+        290
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/dashboard/views/copilot.js",
+          "label": "Copilot view"
+        }
+      ]
+    },
+    {
+      "id": "copilot",
+      "type": "backend",
+      "label": "Copilot",
+      "sublabel": "English → Python",
+      "pos": [
+        290,
+        290
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/features/copilot.py",
+          "line": 50,
+          "label": "_validate_code"
+        }
+      ]
+    },
+    {
+      "id": "scripts",
+      "type": "database",
+      "label": "Script Library",
+      "sublabel": "scripts_library/*.py",
+      "pos": [
+        530,
+        290
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/runner/script_store.py",
+          "label": "ScriptStore"
+        }
+      ]
+    },
+    {
+      "id": "sandbox",
+      "type": "security",
+      "label": "Strategy Runner",
+      "sublabel": "sandbox.py",
+      "pos": [
+        770,
+        290
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/runner/sandbox.py",
+          "line": 164,
+          "label": "launch()"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Matching Engine",
+      "sublabel": "orders → trades",
+      "pos": [
+        1010,
+        290
+      ],
+      "size": [
+        160,
+        70
+      ]
+    },
+    {
+      "id": "mc",
+      "type": "backend",
+      "label": "Monte Carlo",
+      "sublabel": "60–400 engine copies",
+      "pos": [
+        50,
+        490
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/features/montecarlo.py",
+          "line": 99,
+          "label": "run_fan()"
+        }
+      ]
+    },
+    {
+      "id": "tm",
+      "type": "backend",
+      "label": "Time Machine",
+      "sublabel": "5 generated crisis CSVs",
+      "pos": [
+        290,
+        490
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/features/timemachine.py",
+          "line": 164,
+          "label": "_generate_tape"
+        }
+      ]
+    },
+    {
+      "id": "reports",
+      "type": "database",
+      "label": "Reports",
+      "sublabel": "CSV + PDF",
+      "pos": [
+        770,
+        490
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/analytics/reports.py",
+          "label": "reportlab PDF"
+        }
+      ]
+    },
+    {
+      "id": "results",
+      "type": "database",
+      "label": "Results Store",
+      "sublabel": "P&L per strategy/day",
+      "pos": [
+        1010,
+        490
+      ],
+      "size": [
+        160,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/analytics/results.py",
+          "label": "ResultsStore"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Web API process (bridge.py) ke andar",
+      "wraps": [
+        "narrator",
+        "copilot",
+        "scripts",
+        "mc",
+        "tm",
+        "reports",
+        "results"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Sandbox (alag process)",
+      "wraps": [
+        "sandbox"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "describe",
+      "from": "browser",
+      "to": "copilot",
+      "label": "describe",
+      "variant": "emphasis"
+    },
+    {
+      "id": "save",
+      "from": "copilot",
+      "to": "scripts",
+      "label": "save code",
+      "variant": "emphasis"
+    },
+    {
+      "id": "run",
+      "from": "scripts",
+      "to": "sandbox",
+      "label": "run",
+      "variant": "emphasis"
+    },
+    {
+      "id": "orders",
+      "from": "sandbox",
+      "to": "engine",
+      "label": "orders",
+      "variant": "security"
+    },
+    {
+      "id": "feed",
+      "from": "engine",
+      "to": "results",
+      "label": "trade feed",
+      "variant": "emphasis",
+      "labelDy": 24,
+      "labelDx": 42
+    },
+    {
+      "id": "export",
+      "from": "results",
+      "to": "reports",
+      "label": "download",
+      "variant": "emphasis"
+    },
+    {
+      "id": "copilot-ai",
+      "from": "copilot",
+      "to": "gemini",
+      "label": "12s",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "narrator-ai",
+      "from": "narrator",
+      "to": "gemini",
+      "label": "8s",
+      "variant": "dashed"
+    },
+    {
+      "id": "explain",
+      "from": "browser",
+      "to": "narrator",
+      "label": "Explain now",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "fan",
+      "from": "browser",
+      "to": "mc",
+      "label": "what-if",
+      "labelDy": 24
+    },
+    {
+      "id": "crisis",
+      "from": "tm",
+      "to": "engine",
+      "label": "REPLAY_START",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Idea → report",
+      "items": [
+        "Copilot: English → Python (Gemini); compile + UserStrategy + on_tick check",
+        "Fail ho to template code; Copilot khud kabhi run nahi karta",
+        "Script Library: real .py files + index.json",
+        "Results: STRAT_ trades → per-day P&L, drawdown → CSV/PDF"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "What-if tools",
+      "items": [
+        "Monte Carlo: 60 (max 400) engine copies, 6 processes, no network",
+        "Har copy alag seed; optional shock order → p5…p95",
+        "Time Machine: 5 generated crisis tapes (asli data nahi)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Dhyan do",
+      "items": [
+        "Results sirf memory mein — restart par gone",
+        "Narrator: latest tick + trades; Gemini nahi to heuristic",
+        "Lab se Red-Team alag process mein chalu"
+      ]
+    }
+  ]
+}

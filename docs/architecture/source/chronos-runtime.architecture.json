@@ -1,0 +1,426 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Chronos — Runtime Architecture (kaun kya karta hai)",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1385,
+      590
+    ],
+    "repository": {
+      "url": "https://github.com/the-steelix-flame/chronos",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "84947702191e8cc2eedf846701cee3c5146a5d1d"
+    }
+  },
+  "components": [
+    {
+      "id": "dashboard",
+      "type": "frontend",
+      "label": "Dashboard (Browser)",
+      "sublabel": "dashboard/ · plain JS",
+      "tag": "trading terminal UI",
+      "pos": [
+        30,
+        220
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/dashboard/app.js",
+          "label": "UI shell"
+        }
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "Web API Server",
+      "sublabel": "bridge.py · FastAPI :8000",
+      "tag": "REST + WebSocket",
+      "pos": [
+        320,
+        220
+      ],
+      "size": [
+        180,
+        72
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/bridge.py",
+          "line": 381,
+          "label": "/ws + /api routes"
+        }
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "Extra Tools",
+      "sublabel": "Monte Carlo · Copilot · +2",
+      "pos": [
+        320,
+        60
+      ],
+      "size": [
+        180,
+        80
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/features/routes_features.py",
+          "line": 87,
+          "label": "/api/montecarlo …"
+        }
+      ],
+      "tag": "MC · Copilot · TimeMachine · Narrator"
+    },
+    {
+      "id": "gemini",
+      "type": "external",
+      "label": "Google Gemini",
+      "sublabel": "LLM on internet",
+      "brand": "google-gemini",
+      "pos": [
+        590,
+        60
+      ],
+      "size": [
+        170,
+        72
+      ]
+    },
+    {
+      "id": "oracle",
+      "type": "backend",
+      "label": "News Scorer",
+      "sublabel": "oracle.py · :5557",
+      "pos": [
+        870,
+        60
+      ],
+      "size": [
+        170,
+        72
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/oracle.py",
+          "line": 440,
+          "label": "ROUTER + DEALER"
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "type": "database",
+      "label": "Price History Files",
+      "sublabel": "CSV 1-min bars + 5 crisis tapes",
+      "pos": [
+        1170,
+        60
+      ],
+      "size": [
+        180,
+        72
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/replay.py",
+          "label": "replay driver"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Matching Engine",
+      "sublabel": ":5555 orders · :5556 prices",
+      "tag": ":5555 orders · :5556 prices",
+      "pos": [
+        870,
+        216
+      ],
+      "size": [
+        180,
+        80
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/server.py",
+          "line": 70,
+          "label": "ROUTER + PUB"
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "Run Database",
+      "sublabel": "SQLite · chronos.db",
+      "brand": "sqlite",
+      "pos": [
+        1170,
+        220
+      ],
+      "size": [
+        180,
+        72
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/persistence.py",
+          "line": 16,
+          "label": "runs/ticks/trades"
+        }
+      ]
+    },
+    {
+      "id": "strategy",
+      "type": "security",
+      "label": "Strategy Runner",
+      "sublabel": "your code · Docker sandbox",
+      "tag": "Docker or guarded subprocess",
+      "pos": [
+        590,
+        380
+      ],
+      "size": [
+        180,
+        80
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/runner/sandbox.py",
+          "line": 164,
+          "label": "launch()"
+        }
+      ]
+    },
+    {
+      "id": "swarm",
+      "type": "backend",
+      "label": "AI Trader Swarm",
+      "sublabel": "15 MM · 4 whales · 80 retail",
+      "tag": "15 MM · 4 whales · 80 retail",
+      "pos": [
+        870,
+        380
+      ],
+      "size": [
+        180,
+        80
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/worker.py",
+          "line": 54,
+          "label": "build_agents()"
+        }
+      ]
+    },
+    {
+      "id": "fix",
+      "type": "backend",
+      "label": "FIX Gateway",
+      "sublabel": "FIX 4.4 · TCP :9878",
+      "tag": "TCP :9878",
+      "pos": [
+        1170,
+        380
+      ],
+      "size": [
+        180,
+        72
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/runner/fix_gateway.py",
+          "line": 124,
+          "label": "DEALER to engine"
+        }
+      ]
+    },
+    {
+      "id": "bank",
+      "type": "external",
+      "label": "Bank / Fund System",
+      "sublabel": "outside FIX client",
+      "pos": [
+        1170,
+        505
+      ],
+      "size": [
+        180,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Aapka ek computer (single node) — programs aapas mein ZeroMQ se baat karte hain",
+      "wraps": [
+        "bridge",
+        "tools",
+        "oracle",
+        "history",
+        "engine",
+        "db",
+        "strategy",
+        "swarm",
+        "fix"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Sandbox: user ka code (512 MB, CPU limit)",
+      "wraps": [
+        "strategy"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui-to-api",
+      "from": "dashboard",
+      "to": "bridge",
+      "label": "clicks + live view",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-to-engine",
+      "from": "bridge",
+      "to": "engine",
+      "label": "commands :5555 · prices :5556",
+      "variant": "emphasis"
+    },
+    {
+      "id": "engine-to-db",
+      "from": "engine",
+      "to": "db",
+      "label": "save",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-to-tools",
+      "from": "bridge",
+      "to": "tools",
+      "label": "same process",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "labelAt": [
+        352,
+        178
+      ]
+    },
+    {
+      "id": "tools-to-gemini",
+      "from": "tools",
+      "to": "gemini",
+      "label": "AI prompt",
+      "variant": "dashed"
+    },
+    {
+      "id": "oracle-to-gemini",
+      "from": "oracle",
+      "to": "gemini",
+      "label": "score news",
+      "variant": "dashed"
+    },
+    {
+      "id": "api-to-oracle",
+      "from": "bridge",
+      "to": "oracle",
+      "label": "headline",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "oracle-to-engine",
+      "from": "oracle",
+      "to": "engine",
+      "label": "shock order",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        883,
+        160
+      ]
+    },
+    {
+      "id": "history-to-engine",
+      "from": "history",
+      "to": "engine",
+      "label": "replay bars",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "api-to-strategy",
+      "from": "bridge",
+      "to": "strategy",
+      "label": "run script"
+    },
+    {
+      "id": "strategy-to-engine",
+      "from": "strategy",
+      "to": "engine",
+      "label": "orders",
+      "variant": "security"
+    },
+    {
+      "id": "swarm-to-engine",
+      "from": "swarm",
+      "to": "engine",
+      "label": "bot orders"
+    },
+    {
+      "id": "fix-to-engine",
+      "from": "fix",
+      "to": "engine",
+      "label": "orders"
+    },
+    {
+      "id": "bank-to-fix",
+      "from": "bank",
+      "to": "fix",
+      "label": "FIX 4.4"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Main path — ek click ka safar",
+      "items": [
+        "Browser → bridge.py: REST /api + live WebSocket /ws (:8000)",
+        "Bridge ⇄ Engine (ZeroMQ): commands :5555, live prices :5556",
+        "Engine order match karke har tick/trade chronos.db mein save karta hai"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Andar kya hai",
+      "items": [
+        "Engine: order book + matching; pehla user fill → REPLAY se REACTIVE",
+        "Tools: Monte Carlo (400 tak engine copies), Time Machine (5 generated crisis tapes), Copilot, Narrator",
+        "Orders: 99 AI bots, user strategy, FIX clients, News Scorer"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundaries",
+      "items": [
+        "User ka strategy code untrusted → Docker sandbox (512 MB, CPU limit)",
+        "Internet par sirf Gemini; API key na ho to offline fallback",
+        "Sab ek machine par; React frontend/ abhi purane protocol par"
+      ]
+    }
+  ]
+}

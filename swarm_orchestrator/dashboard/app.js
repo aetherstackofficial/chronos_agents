@@ -14,25 +14,25 @@ import { splitter } from './lib/splitter.js';
 import market from './views/market.js';
 import strategies from './views/strategies.js';
 import results from './views/results.js';
-import montecarlo from './views/montecarlo.js';
+// import montecarlo from './views/montecarlo.js';
 import timemachine from './views/timemachine.js';
-import copilot from './views/copilot.js';
-import narration from './views/narration.js';
+// import copilot from './views/copilot.js';
+// import narration from './views/narration.js';
 import runs from './views/runs.js';
 import lab from './views/lab.js';
 
 const ctx = { store, api, fmt, ui, charts, splitter };
 
 /** Fixed nav order (DESIGN.md). Group fallback if a view omits its own. */
-const VIEWS = [market, strategies, results, montecarlo, timemachine, copilot, narration, lab, runs];
+const VIEWS = [market, strategies, results, timemachine,lab, runs];
 const GROUP_FALLBACK = {
   market: '', strategies: 'Trading', results: 'Trading',
-  montecarlo: 'Lab', timemachine: 'Lab', copilot: 'Lab', narration: 'Lab', lab: 'Lab',
+  timemachine: 'Lab', lab: 'Lab',
   runs: 'Data',
 };
 const ICON_FALLBACK = {
-  market: 'candles', strategies: 'code', results: 'report', montecarlo: 'fan',
-  timemachine: 'clock', copilot: 'sparkles', narration: 'feed', lab: 'flask', runs: 'database',
+  market: 'candles', strategies: 'code', results: 'report',
+  timemachine: 'clock', lab: 'flask', runs: 'database',
 };
 /** Views whose data pops out to a standalone page via the topbar ⤢. */
 const POP_PAGES = { market: 'pages/trades.html', results: 'pages/results.html' };
@@ -334,12 +334,12 @@ function buildRhs() {
   rhsState.feedBody = feed.querySelector('.rhs-section-body');
   rhsState.feedBody.innerHTML = '<span class="dim">waiting for events…</span>';
 
-  /* -- market pulse -- */
-  const pulse = rhsSection('Market Pulse', `<button type="button" class="btn btn-ghost btn-icon btn-sm" id="pulse-refresh" aria-label="Refresh narration">${ui.icon('refresh')}</button>`);
-  scroll.appendChild(pulse);
-  rhsState.pulseBody = pulse.querySelector('.rhs-section-body');
-  rhsState.pulseBody.innerHTML = '<div class="pulse-line dim">press ↻ to ask the market why</div>';
-  pulse.querySelector('#pulse-refresh').addEventListener('click', refreshPulse);
+  // /* -- market pulse -- */
+  // const pulse = rhsSection('Market Pulse', `<button type="button" class="btn btn-ghost btn-icon btn-sm" id="pulse-refresh" aria-label="Refresh narration">${ui.icon('refresh')}</button>`);
+  // scroll.appendChild(pulse);
+  // rhsState.pulseBody = pulse.querySelector('.rhs-section-body');
+  // rhsState.pulseBody.innerHTML = '<div class="pulse-line dim">press ↻ to ask the market why</div>';
+  // pulse.querySelector('#pulse-refresh').addEventListener('click', refreshPulse);
 
   el.rhsReopen.addEventListener('click', () => setRhsCollapsed(false));
 
