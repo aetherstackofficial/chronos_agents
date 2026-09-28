@@ -1,584 +1,265 @@
-# import random
-# import numpy as np
-# import pandas as pd
-# from stable_baselines3 import PPO
-# from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+"""Live swarm agents: PPO market makers, PPO whales, heuristic retail.
 
-# from agents.agents import SmartMoneyEnv, MarketMakerEnv
-# from agents.backtest_retail import HeuristicRetailSwarm
+Models are loaded ONCE at import time (module level) and shared by every agent
+instance in the process. Order dicts returned by `on_tick` follow PROTOCOL.md
+§4.1 minus the `msg`/`agent_id` fields (the orchestrator injects those), plus
+one sentinel: `{"cancel_all": True}` which the orchestrator translates to a
+CANCEL_ALL before that agent's subsequent orders.
 
-# print("\n[AI_LOADER] Initializing AI Models into memory. Please wait...")
+Single-truth ledger (PROTOCOL.md §4.2): agents NEVER book their own fills.
+`on_ack` copies `cash`/`pos` from the engine ack — the engine ledger is
+authoritative, which eliminates the Phase-1 partial-fill inventory drift.
 
-# # Dummy data required just to initialize the environment wrappers
-# dummy_df = pd.DataFrame({
-#     'date': ['2026-01-01']*10, 'time': ['09:30:00']*10,
-#     'Open': [100]*10, 'High': [100]*10, 'Low': [100]*10, 'Close': [100]*10,
-#     'Volume': [1000]*10, 'VWAP': [100]*10, 'Volume_MA': [1000]*10,
-#     'Order_Flow_Imbalance': [0]*10, 'RSI_14': [50]*10
-# })
+Sanctioned randomness (PROTOCOL.md §8): capacity/cash draws at construction,
+retail cooldown jitter, and the retail heuristic's 10% noise. Nothing else.
+"""
 
-# # 1. Load Market Maker Brain
-# mm_raw_env = DummyVecEnv([lambda: MarketMakerEnv(dummy_df, max_capacity=5000)])
-# mm_norm_env = VecNormalize.load("agents/ml_models/mm_vec_normalize_stats.pkl", mm_raw_env)
-# mm_norm_env.training = False
-# mm_norm_env.norm_reward = False
-# mm_model = PPO.load("agents/ml_models/market_maker_us_base.zip")
-
-# # 2. Load Institutional Whale Brain
-# whale_raw_env = DummyVecEnv([lambda: SmartMoneyEnv(dummy_df, max_capacity=10000)])
-# whale_norm_env = VecNormalize.load("agents/ml_models/sm_vec_normalize_stats.pkl", whale_raw_env)
-# whale_norm_env.training = False
-# whale_norm_env.norm_reward = False
-# whale_model = PPO.load("agents/ml_models/smart_money_us_base.zip")
-
-# # 3. Load Retail Brain
-# retail_model = HeuristicRetailSwarm()
-
-# print("[AI_LOADER] All Neural Networks loaded successfully!\n")
-
-# def extract_features(tick_data, inventory, max_capacity):
-#     """Safely extracts the 6 features regardless of how the Engine formats the JSON."""
-#     ms = tick_data.get("market_state", tick_data)
-    
-#     vwap_dist = ms.get("vwap_dist", 0.01)
-#     volatility = ms.get("volatility", 0.005)
-#     volume_ratio = ms.get("volume_ratio", 1.0)
-#     rsi_norm = ms.get("rsi_norm", 0.5)
-#     ofi = ms.get("order_flow_imbalance", ms.get("ofi", 0.0))
-#     pos_norm = inventory / max_capacity
-    
-#     return np.array([[vwap_dist, volatility, volume_ratio, rsi_norm, ofi, pos_norm]], dtype=np.float32)
-
-# import random # Add this to the top of live_agents.py if not there
-
-# class LiveWhaleAgent:
-#     def __init__(self, agent_id):
-#         self.agent_id = agent_id
-#         self.inventory = 0
-#         # PDF Specification: Whales between $5M - $20M
-#         self.max_capacity = random.randint(5_000_000, 20_000_000)
-#         self.is_asleep = False # For dynamic participation
-        
-#     def on_price_update(self, tick_data):
-#         if self.is_asleep:
-#             return []
-            
-#         raw_obs = extract_features(tick_data, self.inventory, self.max_capacity)
-#         normalized_obs = whale_norm_env.normalize_obs(raw_obs)
-        
-#         action, _ = whale_model.predict(normalized_obs, deterministic=True)
-#         target_pct = np.clip(action[0][0], -1.0, 1.0)
-#         desired_inventory = int(target_pct * self.max_capacity)
-#         shares_to_trade = desired_inventory - self.inventory
-        
-#         if shares_to_trade == 0:
-#             return []
-            
-#         side = "BUY" if shares_to_trade > 0 else "SELL"
-#         mid_price = float(tick_data.get("order_book", tick_data).get("last_traded_price", tick_data.get("mid_price", 2500)))
-#         self.inventory += shares_to_trade 
-        
-#         return [{"agent_id": self.agent_id, "action": side, "price": float(mid_price), "qty": int(abs(shares_to_trade))}]
-
-# class LiveMarketMaker:
-#     def __init__(self, agent_id):
-#         self.agent_id = agent_id
-#         self.inventory = 0
-#         # PDF Specification: Market Makers between $1M - $5M
-#         self.max_capacity = random.randint(1_000_000, 5_000_000)
-#         self.is_asleep = False
-        
-#     def on_price_update(self, tick_data):
-#         if self.is_asleep:
-#             return []
-            
-#         raw_obs = extract_features(tick_data, self.inventory, self.max_capacity)
-#         normalized_obs = mm_norm_env.normalize_obs(raw_obs)
-#         action, _ = mm_model.predict(normalized_obs, deterministic=True)
-        
-#         bid_bps = max(2.0, ((action[0][0] + 1) / 2) * 50)
-#         ask_bps = max(2.0, ((action[0][1] + 1) / 2) * 50)
-#         quote_qty = int(((action[0][2] + 1) / 2) * self.max_capacity)
-        
-#         if quote_qty == 0:
-#             return []
-
-#         mid_price = float(tick_data.get("order_book", tick_data).get("last_traded_price", tick_data.get("mid_price", 2500)))
-#         bid_price = float(round(mid_price * (1 - (float(bid_bps) / 10000)), 2))
-#         ask_price = float(round(mid_price * (1 + (float(ask_bps) / 10000)), 2))
-        
-#         return [
-#             {"agent_id": self.agent_id, "action": "BUY", "price": bid_price, "qty": int(quote_qty), "type": "LIMIT"},
-#             {"agent_id": self.agent_id, "action": "SELL", "price": ask_price, "qty": int(quote_qty), "type": "LIMIT"}
-#         ]
-
-# class LiveRetailAgent:
-#     def __init__(self, agent_id):
-#         self.agent_id = agent_id
-#         # PDF Specification: Retail between $10k - $100k
-#         self.cash = random.randint(10_000, 100_000)
-#         self.inventory = 0
-#         self.is_asleep = False
-        
-#     def on_price_update(self, tick_data):
-#         if self.is_asleep or self.cash <= 1000: # Handled by liquidation loop next
-#             return []
-            
-#         raw_obs = extract_features(tick_data, self.inventory, self.cash) 
-#         action, _ = retail_model.predict(raw_obs)
-        
-#         target_pct = action[0][0]
-#         if target_pct == 0.0:
-#             return []
-            
-#         side = "BUY" if target_pct > 0 else "SELL"
-#         mid_price = float(tick_data.get("order_book", tick_data).get("last_traded_price", tick_data.get("mid_price", 2500)))
-        
-#         # Simplified execution for retail: assume market order fills instantly at mid
-#         qty = int(abs(target_pct) * (self.cash / mid_price) * 0.5) # Use max 50% of cash per trade
-        
-#         if qty == 0:
-#             return []
-            
-#         if side == "BUY":
-#             self.cash -= (qty * mid_price)
-#             self.inventory += qty
-#         elif side == "SELL" and self.inventory > 0:
-#             qty = min(qty, self.inventory)
-#             self.cash += (qty * mid_price)
-#             self.inventory -= qty
-        
-#         return [{"agent_id": self.agent_id, "action": side, "price": float(mid_price), "qty": int(qty)}]
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+import logging
+import os
 import random
 import time
+
 import numpy as np
 import pandas as pd
-
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-from agents.agents import SmartMoneyEnv, MarketMakerEnv
-from agents.backtest_retail import HeuristicRetailSwarm
+from agents.environments import MarketMakerEnv, SmartMoneyEnv
+from agents.features import build_observation
+from agents.heuristic_retail import HeuristicRetailSwarm
 
-print("\n[AI_LOADER] Initializing AI Models into memory. Please wait...")
+logger = logging.getLogger(__name__)
 
-# =========================================================
-# DUMMY DATA FOR ENVIRONMENT INITIALIZATION
-# =========================================================
+_MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ml_models")
 
-dummy_df = pd.DataFrame({
-    'date': ['2026-01-01'] * 10,
-    'time': ['09:30:00'] * 10,
-    'Open': [100] * 10,
-    'High': [100] * 10,
-    'Low': [100] * 10,
-    'Close': [100] * 10,
-    'Volume': [1000] * 10,
-    'VWAP': [100] * 10,
-    'Volume_MA': [1000] * 10,
-    'Order_Flow_Imbalance': [0] * 10,
-    'RSI_14': [50] * 10
+logger.info("Loading AI models into memory (once per process)...")
+
+# ---------------------------------------------------------------------------
+# Constructor stub dataframe.
+#
+# The gym environments require a dataframe in their constructor, but here they
+# exist ONLY as VecNormalize wrappers around the trained normalisation stats —
+# they are never reset or stepped, and this frame never generates market data.
+# This is NOT a No-Dummy violation (PROTOCOL.md §8): it is a required
+# constructor stub, not a data source.
+# ---------------------------------------------------------------------------
+_dummy_df = pd.DataFrame({
+    "date": ["2026-01-01"] * 10,
+    "time": ["09:30:00"] * 10,
+    "Open": [100.0] * 10,
+    "High": [100.0] * 10,
+    "Low": [100.0] * 10,
+    "Close": [100.0] * 10,
+    "Volume": [1000] * 10,
+    "VWAP": [100.0] * 10,
+    "Volume_MA": [1000.0] * 10,
+    "Order_Flow_Imbalance": [0.0] * 10,
+    "RSI_14": [50.0] * 10,
 })
 
-# =========================================================
-# LOAD MARKET MAKER MODEL
-# =========================================================
-
-mm_raw_env = DummyVecEnv([
-    lambda: MarketMakerEnv(dummy_df, max_capacity=5000)
-])
-
+# --- Market Maker brain (PPO + frozen VecNormalize stats) ---
+_mm_raw_env = DummyVecEnv([lambda: MarketMakerEnv(_dummy_df, max_capacity=5000)])
 mm_norm_env = VecNormalize.load(
-    "agents/ml_models/mm_vec_normalize_stats.pkl",
-    mm_raw_env
+    os.path.join(_MODELS_DIR, "mm_vec_normalize_stats.pkl"), _mm_raw_env
 )
-
 mm_norm_env.training = False
 mm_norm_env.norm_reward = False
+mm_model = PPO.load(os.path.join(_MODELS_DIR, "market_maker_us_base.zip"))
 
-mm_model = PPO.load(
-    "agents/ml_models/market_maker_us_base.zip"
-)
-
-# =========================================================
-# LOAD WHALE MODEL
-# =========================================================
-
-whale_raw_env = DummyVecEnv([
-    lambda: SmartMoneyEnv(dummy_df, max_capacity=10000)
-])
-
+# --- Institutional Whale brain (PPO + frozen VecNormalize stats) ---
+_whale_raw_env = DummyVecEnv([lambda: SmartMoneyEnv(_dummy_df, max_capacity=10000)])
 whale_norm_env = VecNormalize.load(
-    "agents/ml_models/sm_vec_normalize_stats.pkl",
-    whale_raw_env
+    os.path.join(_MODELS_DIR, "sm_vec_normalize_stats.pkl"), _whale_raw_env
 )
-
 whale_norm_env.training = False
 whale_norm_env.norm_reward = False
+whale_model = PPO.load(os.path.join(_MODELS_DIR, "smart_money_us_base.zip"))
 
-whale_model = PPO.load(
-    "agents/ml_models/smart_money_us_base.zip"
-)
-
-# =========================================================
-# LOAD RETAIL MODEL
-# =========================================================
-
+# --- Retail brain (rule-based, no normalisation) ---
 retail_model = HeuristicRetailSwarm()
 
-print("[AI_LOADER] All Neural Networks loaded successfully!\n")
+logger.info("All agent brains loaded.")
 
 
-# =========================================================
-# FEATURE EXTRACTION
-# =========================================================
-
-def extract_features(tick_data, inventory, max_capacity):
-
-    ms = tick_data.get("market_state", tick_data)
-
-    vwap_dist = ms.get("vwap_dist", 0.01)
-    volatility = ms.get("volatility", 0.005)
-    volume_ratio = ms.get("volume_ratio", 1.0)
-    rsi_norm = ms.get("rsi_norm", 0.5)
-
-    ofi = ms.get(
-        "order_flow_imbalance",
-        ms.get("ofi", 0.0)
-    )
-
-    pos_norm = inventory / max_capacity
-
-    return np.array([
-        [
-            vwap_dist,
-            volatility,
-            volume_ratio,
-            rsi_norm,
-            ofi,
-            pos_norm
-        ]
-    ], dtype=np.float32)
+def _mid_price(tick: dict) -> float:
+    """Reference price for quoting: engine mid, falling back to last trade."""
+    mid = tick.get("mid_price")
+    if mid:
+        return float(mid)
+    return float(tick["last_price"])
 
 
-# =========================================================
-# WHALE AGENT
-# =========================================================
+class _LiveAgentBase:
+    """Common ledger plumbing for every live agent.
 
-class LiveWhaleAgent:
+    Attributes:
+        agent_id: engine-facing identity (PROTOCOL.md §4.1 `agent_id`).
+        cash / inventory: mirror of the ENGINE ledger, updated only via acks.
+        is_asleep: dynamic-participation flag set by the orchestrator.
+        last_trade: wall-clock time of the last emitted action (cooldowns).
+    """
 
-    def __init__(self, agent_id):
-
+    def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
+        self.cash: float = 0.0
+        self.inventory: int = 0
+        self.is_asleep: bool = False
+        self.last_trade: float = 0.0
 
-        self.inventory = 0
+    def on_tick(self, tick: dict) -> "list[dict]":
+        """Return this tick's orders (§4.1 minus msg/agent_id). Override."""
+        raise NotImplementedError
 
-        # REALISTIC SIZE
-        self.max_capacity = random.randint(
-            50000,
-            200000
-        )
+    def on_ack(self, ack: dict) -> None:
+        """Adopt the engine's post-action ledger (§4.2 — authoritative)."""
+        cash = ack.get("cash")
+        if cash is not None:
+            self.cash = float(cash)
+        pos = ack.get("pos")
+        if pos is not None:
+            self.inventory = int(pos)
 
-        self.is_asleep = False
 
-        self.last_trade = 0
+class LiveMarketMaker(_LiveAgentBase):
+    """PPO liquidity provider: model-driven cancel/replace two-sided quoting.
 
-    def on_price_update(self, tick_data):
+    Uses the REAL 3-D model output [bid_offset, ask_offset, quote_size]
+    (fixes flaws R6/M5 where the model's spread was discarded for random
+    offsets). Refreshes quotes at most once per second, like a real MM's
+    throttled cancel/replace cycle.
+    """
 
+    COOLDOWN_S = 1.0
+    MAX_BPS = 50.0
+    MIN_BPS = 2.0
+    QUOTE_TIF_TICKS = 5
+
+    def __init__(self, agent_id: str) -> None:
+        super().__init__(agent_id)
+        self.max_capacity = random.randint(5_000, 25_000)
+
+    def on_tick(self, tick: dict) -> "list[dict]":
         if self.is_asleep:
             return []
-
-        # COOLDOWN
-        if time.time() - self.last_trade < 2:
+        now = time.time()
+        if now - self.last_trade < self.COOLDOWN_S:
             return []
 
-        raw_obs = extract_features(
-            tick_data,
-            self.inventory,
-            self.max_capacity
-        )
+        obs = build_observation(tick, self.inventory, self.max_capacity)
+        norm_obs = mm_norm_env.normalize_obs(obs)
+        action, _ = mm_model.predict(norm_obs, deterministic=True)
+        a = action[0]
 
-        normalized_obs = whale_norm_env.normalize_obs(raw_obs)
+        bid_bps = max(self.MIN_BPS, ((float(a[0]) + 1.0) / 2.0) * self.MAX_BPS)
+        ask_bps = max(self.MIN_BPS, ((float(a[1]) + 1.0) / 2.0) * self.MAX_BPS)
+        quote_qty = int(max(10.0, min(((float(a[2]) + 1.0) / 2.0) * self.max_capacity, 3000.0)))
 
-        action, _ = whale_model.predict(
-            normalized_obs,
-            deterministic=True
-        )
+        mid = _mid_price(tick)
+        bid_price = round(mid * (1.0 - bid_bps / 10_000.0), 2)
+        ask_price = round(mid * (1.0 + ask_bps / 10_000.0), 2)
 
-        target_pct = np.clip(
-            action[0][0],
-            -1.0,
-            1.0
-        )
-
-        desired_inventory = int(
-            target_pct * self.max_capacity
-        )
-
-        shares_to_trade = desired_inventory - self.inventory
-
-        # CLAMP TRADE SIZE
-        shares_to_trade = max(
-            -10000,
-            min(shares_to_trade, 10000)
-        )
-
-        if shares_to_trade == 0:
-            return []
-
-        side = "BUY" if shares_to_trade > 0 else "SELL"
-
-        mid_price = float(
-            tick_data.get("order_book", tick_data)
-            .get(
-                "last_traded_price",
-                tick_data.get("mid_price", 2500)
-            )
-        )
-
-        self.inventory += shares_to_trade
-
-        self.last_trade = time.time()
-
+        self.last_trade = now
         return [
-            {
-                "agent_id": self.agent_id,
-                "action": side,
-                "price": round(mid_price, 2),
-                "qty": int(abs(shares_to_trade)),
-                "type": "MARKET"
-            }
+            {"cancel_all": True},
+            {"action": "BUY", "type": "LIMIT", "price": bid_price,
+             "qty": quote_qty, "tif_ticks": self.QUOTE_TIF_TICKS},
+            {"action": "SELL", "type": "LIMIT", "price": ask_price,
+             "qty": quote_qty, "tif_ticks": self.QUOTE_TIF_TICKS},
         ]
 
 
-# =========================================================
-# MARKET MAKER AGENT
-# =========================================================
+class LiveWhaleAgent(_LiveAgentBase):
+    """PPO institutional whale: model-driven target position via MARKET orders.
 
-class LiveMarketMaker:
+    Inventory truth comes exclusively from engine acks (`on_ack` sets
+    `inventory = ack['pos']`), so partial fills can never drift the whale's
+    view of its own position.
+    """
 
-    def __init__(self, agent_id):
+    COOLDOWN_S = 2.0
+    MAX_CLIP = 10_000  # per-action share clamp
 
-        self.agent_id = agent_id
+    def __init__(self, agent_id: str) -> None:
+        super().__init__(agent_id)
+        self.max_capacity = random.randint(50_000, 200_000)
 
-        self.inventory = 0
-
-        # REDUCED INVENTORY
-        self.max_capacity = random.randint(
-            5000,
-            25000
-        )
-
-        self.is_asleep = False
-
-        self.last_trade = 0
-
-    def on_price_update(self, tick_data):
-
+    def on_tick(self, tick: dict) -> "list[dict]":
         if self.is_asleep:
             return []
-
-        # COOLDOWN
-        if time.time() - self.last_trade < 1:
+        now = time.time()
+        if now - self.last_trade < self.COOLDOWN_S:
             return []
 
-        raw_obs = extract_features(
-            tick_data,
-            self.inventory,
-            self.max_capacity
-        )
+        obs = build_observation(tick, self.inventory, self.max_capacity)
+        norm_obs = whale_norm_env.normalize_obs(obs)
+        action, _ = whale_model.predict(norm_obs, deterministic=True)
 
-        normalized_obs = mm_norm_env.normalize_obs(raw_obs)
+        target_pct = float(np.clip(action[0][0], -1.0, 1.0))
+        desired = int(target_pct * self.max_capacity)
+        delta = desired - self.inventory
+        delta = max(-self.MAX_CLIP, min(delta, self.MAX_CLIP))
+        if delta == 0:
+            return []
 
-        action, _ = mm_model.predict(
-            normalized_obs,
-            deterministic=True
-        )
-
-        mid_price = float(
-            tick_data.get("order_book", tick_data)
-            .get(
-                "last_traded_price",
-                tick_data.get("mid_price", 2500)
-            )
-        )
-
-        # REALISTIC SPREADS
-        bid_offset = random.uniform(0.001, 0.003)
-        ask_offset = random.uniform(0.001, 0.003)
-
-        bid_price = round(
-            mid_price * (1 - bid_offset),
-            2
-        )
-
-        ask_price = round(
-            mid_price * (1 + ask_offset),
-            2
-        )
-
-        # CONTROLLED QUANTITY
-        raw_qty = ((action[0][2] + 1) / 2)
-
-        quote_qty = int(
-            max(
-                10,
-                min(raw_qty * 1000, 3000)
-            )
-        )
-
-        self.last_trade = time.time()
-
-        return [
-            {
-                "agent_id": self.agent_id,
-                "action": "BUY",
-                "price": bid_price,
-                "qty": quote_qty,
-                "type": "LIMIT"
-            },
-            {
-                "agent_id": self.agent_id,
-                "action": "SELL",
-                "price": ask_price,
-                "qty": quote_qty,
-                "type": "LIMIT"
-            }
-        ]
+        self.last_trade = now
+        side = "BUY" if delta > 0 else "SELL"
+        return [{"action": side, "type": "MARKET", "qty": abs(delta)}]
 
 
-# =========================================================
-# RETAIL AGENT
-# =========================================================
+class LiveRetailAgent(_LiveAgentBase):
+    """Heuristic retail trader with conviction-scaled sizing.
 
-class LiveRetailAgent:
+    Sizing is conviction * 50% of cash (capped 1..100 shares) — replaces the
+    Phase-1 'random 1-20 shares' dummy. Cash/inventory mirror the engine ledger
+    via acks; on an engine liquidation event the orchestrator calls
+    `on_liquidation` to mirror the engine's ledger reset (PROTOCOL.md §8.6).
+    Cooldown jitter and the heuristic's internal 10% noise are sanctioned
+    behavioural randomness (§8).
+    """
 
-    def __init__(self, agent_id):
+    LIQUIDATION_RESET_CASH = 50_000.0  # engine resets retail to ₹50k / 0 pos
+    MAX_QTY = 100
 
-        self.agent_id = agent_id
+    def __init__(self, agent_id: str) -> None:
+        super().__init__(agent_id)
+        self.cash = float(random.randint(10_000, 100_000))
+        self._cooldown_s = random.uniform(2.0, 5.0)
 
-        self.cash = random.randint(
-            10000,
-            100000
-        )
-
+    def on_liquidation(self) -> None:
+        """Mirror the engine's liquidation reset (engine is authoritative)."""
+        self.cash = self.LIQUIDATION_RESET_CASH
         self.inventory = 0
 
-        self.is_asleep = False
-
-        self.last_trade = 0
-
-    def on_price_update(self, tick_data):
-
+    def on_tick(self, tick: dict) -> "list[dict]":
         if self.is_asleep:
             return []
-
-        # COOLDOWN
-        if time.time() - self.last_trade < random.uniform(2, 5):
+        now = time.time()
+        if now - self.last_trade < self._cooldown_s:
             return []
 
-        raw_obs = extract_features(
-            tick_data,
-            self.inventory,
-            self.cash
-        )
-
-        action, _ = retail_model.predict(raw_obs)
-
-        target_pct = action[0][0]
-
-        if target_pct == 0.0:
+        last_price = float(tick["last_price"])
+        if last_price <= 0:
             return []
 
-        side = "BUY" if target_pct > 0 else "SELL"
+        # Retail normalises position by its own bankroll (capacity proxy).
+        obs = build_observation(tick, self.inventory, max(self.cash, 1.0))
+        action, _ = retail_model.predict(obs)
+        raw = float(action[0][0])
+        conviction = abs(raw)
+        if conviction == 0.0:
+            return []
 
-        mid_price = float(
-            tick_data.get("order_book", tick_data)
-            .get(
-                "last_traded_price",
-                tick_data.get("mid_price", 2500)
-            )
-        )
-
-        # SMALL RETAIL SIZE
-        qty = random.randint(1, 20)
-
-        if side == "BUY":
-
-            cost = qty * mid_price
-
-            if self.cash < cost:
-                return []
-
-            self.cash -= cost
-            self.inventory += qty
-
+        qty = max(1, min(self.MAX_QTY, int(conviction * self.cash * 0.5 / last_price)))
+        if raw > 0:
+            side = "BUY"
+            if self.cash < qty * last_price:
+                return []  # cannot cover the buy
         else:
-
+            side = "SELL"
             if self.inventory <= 0:
-                return []
-
+                return []  # nothing to sell (no naked retail shorts)
             qty = min(qty, self.inventory)
 
-            self.cash += qty * mid_price
-            self.inventory -= qty
-
-        self.last_trade = time.time()
-
-        return [
-            {
-                "agent_id": self.agent_id,
-                "action": side,
-                "price": round(mid_price, 2),
-                "qty": qty,
-                "type": "MARKET"
-            }
-        ]
+        self.last_trade = now
+        self._cooldown_s = random.uniform(2.0, 5.0)  # sanctioned jitter (§8)
+        return [{"action": side, "type": "MARKET", "qty": qty}]

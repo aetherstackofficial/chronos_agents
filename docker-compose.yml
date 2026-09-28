@@ -8,8 +8,17 @@ services:
     container_name: chronos_engine
     ports:
       - "5555:5555"
+      - "5556:5556"
     environment:
+      # BIND address. engine/server.py binds to ZMQ_HOST, and its default (127.0.0.1) is
+      # loopback-only inside the container, so no other container could ever connect.
+      # (Every OTHER service uses ZMQ_HOST=engine as the address to CONNECT to.)
+      - ZMQ_HOST=0.0.0.0
       - ZMQ_ORDER_PORT=5555
+      - ZMQ_DATA_PORT=5556
+      - CHRONOS_DB=/data/chronos.db
+    volumes:
+      - chronos_data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('127.0.0.1', 5555)); s.close()"]
       interval: 5s
@@ -21,9 +30,12 @@ services:
       context: .
       dockerfile: Dockerfile.oracle
     container_name: chronos_oracle
+    ports:
+      - "5557:5557"
     environment:
       - ZMQ_HOST=engine
       - ZMQ_ORDER_PORT=5555
+      - ORACLE_PORT=5557
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       engine:
@@ -37,6 +49,7 @@ services:
     environment:
       - ZMQ_HOST=engine
       - ZMQ_ORDER_PORT=5555
+      - ZMQ_DATA_PORT=5556
     depends_on:
       engine:
         condition: service_healthy
@@ -51,6 +64,15 @@ services:
     environment:
       - ZMQ_HOST=engine
       - ZMQ_ORDER_PORT=5555
+      - ZMQ_DATA_PORT=5556
+      - ORACLE_HOST=oracle
+      - ORACLE_PORT=5557
+      - BRIDGE_HOST=0.0.0.0
+      - BRIDGE_PORT=8000
+      - CHRONOS_DB=/data/chronos.db
+    volumes:
+      # Same volume the engine writes to, so /api/runs and equity curves can read it.
+      - chronos_data:/data
     depends_on:
       engine:
         condition: service_healthy
@@ -66,3 +88,6 @@ services:
       - "3000:80"
     depends_on:
       - bridge
+
+volumes:
+  chronos_data:

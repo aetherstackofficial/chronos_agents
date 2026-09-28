@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<title>Chronos Terminal</title>
+<link rel="stylesheet" href="design-tokens.css">
+<link rel="stylesheet" href="app-shell.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.0/min/vs/loader.js"></script>
+</head>
+<body>
+
+<div id="ws-banner" class="ws-banner" role="status" hidden>
+  <span class="spinner" aria-hidden="true"></span>
+  <span>Connection lost — reconnecting to the engine…</span>
+</div>
+
+<header id="topbar" class="topbar">
+  <div class="brand" aria-label="Chronos">
+    <span class="brand-mark" aria-hidden="true">◆</span>
+    <span class="brand-name">CHRONOS</span>
+  </div>
+
+  <div class="topbar-status" aria-label="Live market status">
+    <span id="tb-mode" class="chip" hidden><span class="dot" aria-hidden="true"></span><span id="tb-mode-text">—</span></span>
+    <span id="tb-day" class="tb-stat mono" hidden>DAY <b id="tb-day-n">—</b></span>
+    <span id="tb-clock" class="tb-stat mono" hidden>—</span>
+    <span id="tb-price" class="tb-price mono" hidden>—</span>
+    <span id="tb-regime" class="chip" hidden><span id="tb-regime-text">—</span></span>
+  </div>
+
+  <div class="topbar-controls" role="group" aria-label="Simulation controls">
+    <button type="button" id="tb-start" class="btn btn-primary btn-sm">START</button>
+    <button type="button" id="tb-pause" class="btn btn-sm" disabled>PAUSE</button>
+    <button type="button" id="tb-reset" class="btn btn-ghost btn-sm" disabled>RESET</button>
+    <button type="button" id="tb-pop" class="btn btn-ghost btn-icon" aria-label="Pop out current view data" title="Pop out" hidden></button>
+    <span id="tb-conn" class="conn-dot" role="status" aria-label="Engine connection: connecting"></span>
+  </div>
+</header>
+
+<div id="shell" class="shell">
+  <nav id="nav" class="nav-rail" aria-label="Views"></nav>
+  <main id="center" class="center-mount"></main>
+  <aside id="rhs" class="rhs-panel" aria-label="Actions and live context"></aside>
+</div>
+
+<button type="button" id="rhs-reopen" class="rhs-reopen" aria-label="Reopen side panel" hidden>⟨</button>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

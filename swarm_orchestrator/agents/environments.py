@@ -1,4 +1,4 @@
-from agents.core_environment import UniversalMarketEnv
+from agents.base_environment import UniversalMarketEnv
 from gymnasium import spaces
 import numpy as np
 

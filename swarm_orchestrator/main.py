@@ -1,41 +1,11 @@
-# --- CRITICAL WINDOWS FIX: IMPORT AI/TORCH FIRST ---
-from agents.live_agents import LiveWhaleAgent, LiveMarketMaker, LiveRetailAgent
+"""Boot the full default Chronos swarm: 15 MM + 4 Whale + 80 Retail.
 
-# --- IMPORT NETWORKING SECOND ---
-import asyncio
-import sys
-import logging
-from core.loop_manager import SwarmOrchestrator
+Thin convenience wrapper — equivalent to `python worker.py --role all`.
+worker.py already enforces the Windows import order (torch before zmq) and
+sets WindowsSelectorEventLoopPolicy in its entrypoint.
+"""
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [SWARM] - %(message)s')
-
-async def main():
-    orchestrator = SwarmOrchestrator()
-    swarm = []
-    
-    # Instantiate 15 PPO Market Makers
-    for i in range(15):
-        swarm.append(LiveMarketMaker(f"MM_{i}"))
-        
-    # Instantiate 4 PPO Hedge Funds (Whales)
-    for i in range(4):
-        swarm.append(LiveWhaleAgent(f"WHALE_{i}"))
-        
-    # Instantiate 80 Rule-Based Retail Traders
-    for i in range(80):
-        swarm.append(LiveRetailAgent(f"RETAIL_{i}"))
-        
-    orchestrator.load_agents(swarm)
-    
-    try:
-        await orchestrator.run()
-    except asyncio.CancelledError:
-        pass
-    finally:
-        logging.info("Shutting down AI Swarm orchestrator...")
-        orchestrator.shutdown()
+from worker import main
 
 if __name__ == "__main__":
-    if sys.platform == 'win32':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(main())
+    main(["--role", "all"])

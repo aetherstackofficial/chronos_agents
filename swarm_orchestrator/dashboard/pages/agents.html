@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chronos — Agents</title>
+<link rel="stylesheet" href="../design-tokens.css">
+<style>
+.page{height:100vh;display:flex;flex-direction:column}
+.pop-head{flex:0 0 var(--topbar-h);display:flex;align-items:center;gap:var(--s-4);padding:0 var(--s-5);
+  border-bottom:1px solid var(--border);background:var(--bg-1)}
+.logo{font-weight:700;color:var(--text-hi);letter-spacing:.06em;font-size:var(--fs-md);text-decoration:none}
+.logo:hover{text-decoration:none}
+.logo .diamond{color:var(--accent-2)}
+.page-name{font-size:var(--fs-xs);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-mut)}
+.spacer{flex:1 1 auto}
+.meta{font-size:var(--fs-sm);color:var(--text-mut)}
+.meta .mono{color:var(--text-hi)}
+.conn-dot{width:9px;height:9px;border-radius:50%;background:var(--down);flex:0 0 auto;
+  transition:background var(--dur-2) var(--ease),box-shadow var(--dur-2) var(--ease)}
+.conn-dot.on{background:var(--live);box-shadow:0 0 8px var(--live)}
+main{flex:1 1 auto;min-height:0;padding:var(--s-4);display:flex;flex-direction:column}
+.board{flex:1 1 auto;min-height:0}
+.board .panel-body{padding:0}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text-hi)}
+th.sortable .arrow{opacity:.35;font-size:9px;margin-left:4px}
+th.sortable[aria-sort] .arrow{opacity:1;color:var(--accent-2)}
+.board-empty{padding:var(--s-8)}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="pop-head">
+    <a class="logo" href="../index.html" aria-label="Chronos home"><span class="diamond">◆</span> CHRONOS</a>
+    <span class="page-name">Agents</span>
+    <span class="spacer"></span>
+    <span class="meta" id="head-meta" aria-live="polite">waiting for tick…</span>
+    <span class="conn-dot" id="conn" role="status" aria-label="Feed disconnected" title="disconnected"></span>
+  </header>
+  <main>
+    <div class="panel board">
+      <div class="panel-head"><span>Swarm Leaderboard — live, 1 Hz, ranked by real ledger P&amp;L</span></div>
+      <div class="panel-body flush">
+        <table class="grid" aria-label="All agents">
+          <thead>
+            <tr id="head-row">
+              <th scope="col" class="sortable" data-key="id">Agent<span class="arrow" aria-hidden="true">▼</span></th>
+              <th scope="col" class="sortable" data-key="type">Type<span class="arrow" aria-hidden="true">▼</span></th>
+              <th scope="col" class="sortable" data-key="pnl">P&amp;L<span class="arrow" aria-hidden="true">▼</span></th>
+              <th scope="col" class="sortable" data-key="pos">Pos<span class="arrow" aria-hidden="true">▼</span></th>
+              <th scope="col" class="sortable" data-key="cash">Cash<span class="arrow" aria-hidden="true">▼</span></th>
+            </tr>
+          </thead>
+          <tbody id="board-body"></tbody>
+        </table>
+        <div class="empty board-empty" id="board-empty">
+          <div>Waiting for the live tick…<br>Start the simulation from the Chronos shell and the swarm leaderboard appears here at 1 Hz.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toasts"></div>
+
+<script type="module">
+import { store } from '../lib/store.js';
+import { fmt } from '../lib/format.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+const body = document.getElementById('board-body');
+const emptyEl = document.getElementById('board-empty');
+const headMeta = document.getElementById('head-meta');
+
+let rows = [];
+let sortKey = 'pnl';
+let sortDir = -1; // desc
+
+const cmp = (a, b) => {
+  const x = a[sortKey], y = b[sortKey];
+  if (typeof x === 'number' && typeof y === 'number') return (x - y) * sortDir;
+  return String(x ?? '').localeCompare(String(y ?? '')) * sortDir;
+};
+
+const render = () => {
+  const sorted = rows.slice().sort(cmp);
+  body.innerHTML = sorted.map((a) => `<tr>
+    <td class="mono"><a href="agent.html?id=${encodeURIComponent(a.id)}" title="Open agent detail">${esc(a.id)}</a></td>
+    <td>${esc(a.type)}</td>
+    <td class="mono ${a.pnl > 0 ? 'num-up' : (a.pnl < 0 ? 'num-down' : '')}">${a.pnl >= 0 ? '+' : ''}${fmt.inr(a.pnl)}</td>
+    <td class="mono ${a.pos > 0 ? 'num-up' : (a.pos < 0 ? 'num-down' : 'num-dim')}">${a.pos}</td>
+    <td class="mono">${fmt.inr(a.cash)}</td>
+  </tr>`).join('');
+  emptyEl.hidden = rows.length > 0;
+};
+
+document.getElementById('head-row').addEventListener('click', (ev) => {
+  const th = ev.target.closest('th.sortable');
+  if (!th) return;
+  const key = th.dataset.key;
+  if (sortKey === key) sortDir = -sortDir;
+  else { sortKey = key; sortDir = (key === 'id' || key === 'type') ? 1 : -1; }
+  document.querySelectorAll('th.sortable').forEach((h) => {
+    h.removeAttribute('aria-sort');
+    h.querySelector('.arrow').textContent = '▼';
+  });
+  th.setAttribute('aria-sort', sortDir === 1 ? 'ascending' : 'descending');
+  th.querySelector('.arrow').textContent = sortDir === 1 ? '▲' : '▼';
+  render();
+});
+
+const onTick = (tick) => {
+  if (!tick) return;
+  rows = Array.isArray(tick.leaderboard) ? tick.leaderboard : [];
+  headMeta.innerHTML =
+    `<span class="mono">${esc(tick.symbol)}</span> · DAY ${tick.day_count} · ${fmt.time(tick.unix_time)} · ` +
+    `<span class="mono">${fmt.inr(tick.last_price)}</span> · ${rows.length} agents`;
+  render();
+};
+
+onTick((store.latestTick && store.latestTick()) || store.state.tick);
+store.onTick(onTick);
+
+const conn = document.getElementById('conn');
+const paintStatus = (s) => {
+  const on = s === true || s === 'connected' || (s && s.connected === true);
+  conn.classList.toggle('on', !!on);
+  conn.title = on ? 'connected' : 'disconnected';
+  conn.setAttribute('aria-label', on ? 'Feed connected' : 'Feed disconnected');
+};
+paintStatus(store.state.connected);
+store.onStatus(paintStatus);
+</script>
+</body>
+</html>

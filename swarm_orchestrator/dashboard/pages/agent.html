@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chronos — Agent Detail</title>
+<link rel="stylesheet" href="../design-tokens.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+.page{height:100vh;display:flex;flex-direction:column}
+.pop-head{flex:0 0 var(--topbar-h);display:flex;align-items:center;gap:var(--s-4);padding:0 var(--s-5);
+  border-bottom:1px solid var(--border);background:var(--bg-1)}
+.logo{font-weight:700;color:var(--text-hi);letter-spacing:.06em;font-size:var(--fs-md);text-decoration:none}
+.logo:hover{text-decoration:none}
+.logo .diamond{color:var(--accent-2)}
+.page-name{font-size:var(--fs-xs);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-mut)}
+.agent-id{font-family:var(--mono);color:var(--accent-2);font-size:var(--fs-md)}
+.spacer{flex:1 1 auto}
+.conn-dot{width:9px;height:9px;border-radius:50%;background:var(--down);flex:0 0 auto;
+  transition:background var(--dur-2) var(--ease),box-shadow var(--dur-2) var(--ease)}
+.conn-dot.on{background:var(--live);box-shadow:0 0 8px var(--live)}
+main{flex:1 1 auto;min-height:0;overflow:auto;padding:var(--s-4);display:flex;flex-direction:column;gap:var(--s-4)}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:var(--s-3)}
+.detail-grid{flex:1 1 auto;min-height:360px;display:grid;grid-template-columns:3fr 2fr;gap:var(--s-4)}
+@media (max-width:900px){.detail-grid{grid-template-columns:1fr}}
+.chart-host{flex:1 1 auto;min-height:260px;position:relative}
+.chart-host .empty{position:absolute;inset:0}
+.trades-panel .panel-body{padding:0}
+.hint{font-size:var(--fs-sm);color:var(--text-dim)}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="pop-head">
+    <a class="logo" href="../index.html" aria-label="Chronos home"><span class="diamond">◆</span> CHRONOS</a>
+    <span class="page-name">Agent</span>
+    <span class="agent-id" id="head-id">—</span>
+    <span class="spacer"></span>
+    <a class="hint" href="agents.html">← all agents</a>
+    <span class="conn-dot" id="conn" role="status" aria-label="Feed disconnected" title="disconnected"></span>
+  </header>
+  <main>
+    <div class="stat-row" aria-live="polite">
+      <div class="card stat"><span class="k">Type</span><span class="v" id="st-type">—</span></div>
+      <div class="card stat"><span class="k">P&amp;L</span><span class="v" id="st-pnl">—</span></div>
+      <div class="card stat"><span class="k">Position</span><span class="v" id="st-pos">—</span></div>
+      <div class="card stat"><span class="k">Cash</span><span class="v" id="st-cash">—</span></div>
+    </div>
+    <div class="hint" id="live-hint">Waiting for the live tick — stats fill in from the engine leaderboard (top 15 by P&amp;L).</div>
+    <div class="detail-grid">
+      <div class="panel">
+        <div class="panel-head"><span>Equity Curve — newest persisted run</span><span class="actions mono" id="eq-meta"></span></div>
+        <div class="panel-body flush">
+          <div class="chart-host" id="eq-chart">
+            <div class="empty"><div><span class="spinner" aria-hidden="true"></span><br>Loading persisted equity…</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="panel trades-panel">
+        <div class="panel-head"><span>Recent Trades</span><span class="actions mono" id="tr-count"></span></div>
+        <div class="panel-body flush">
+          <table class="grid" aria-label="Recent trades for this agent">
+            <thead>
+              <tr><th scope="col">Time</th><th scope="col">Side</th><th scope="col">Price</th><th scope="col">Qty</th><th scope="col">Counterparty</th></tr>
+            </thead>
+            <tbody id="tr-body"></tbody>
+          </table>
+          <div class="empty" id="tr-empty" style="padding:var(--s-8)">
+            <div>No fills seen for this agent yet on the live feed.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toasts"></div>
+
+<script type="module">
+import { store } from '../lib/store.js';
+import { api } from '../lib/api.js';
+import { fmt } from '../lib/format.js';
+import * as charts from '../lib/charts.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+const tokenColor = (name) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || undefined;
+
+const id = new URLSearchParams(location.search).get('id') || '';
+document.getElementById('head-id').textContent = id || 'unknown';
+document.title = `Chronos — ${id || 'Agent'}`;
+
+const eqChartHost = document.getElementById('eq-chart');
+const liveHint = document.getElementById('live-hint');
+
+if (!id) {
+  liveHint.textContent = 'No agent id supplied — open this page as agent.html?id=WHALE_0 (or click a row in the Agents page).';
+  eqChartHost.innerHTML = '<div class="empty"><div>Nothing to plot without an agent id.</div></div>';
+}
+
+// ---- live header stats from the leaderboard --------------------------------
+let seen = false;
+const onTick = (tick) => {
+  if (!tick || !id) return;
+  const a = (tick.leaderboard || []).find((x) => x.id === id);
+  if (!a) {
+    if (!seen) liveHint.textContent =
+      `Live tick flowing, but "${id}" is not on the leaderboard (top 15 by P&L) right now — header stats update when it appears.`;
+    return;
+  }
+  seen = true;
+  liveHint.hidden = true;
+  document.getElementById('st-type').textContent = a.type ?? '—';
+  const pnlEl = document.getElementById('st-pnl');
+  pnlEl.textContent = (a.pnl >= 0 ? '+' : '') + fmt.inr(a.pnl);
+  pnlEl.className = 'v ' + (a.pnl > 0 ? 'num-up' : (a.pnl < 0 ? 'num-down' : ''));
+  const posEl = document.getElementById('st-pos');
+  posEl.textContent = String(a.pos);
+  posEl.className = 'v ' + (a.pos > 0 ? 'num-up' : (a.pos < 0 ? 'num-down' : ''));
+  document.getElementById('st-cash').textContent = fmt.inr(a.cash);
+};
+onTick((store.latestTick && store.latestTick()) || store.state.tick);
+store.onTick(onTick);
+
+// ---- persisted equity curve ------------------------------------------------
+const setLineData = (h, data) => {
+  if (!h) return;
+  if (typeof h.setData === 'function') h.setData(data);
+  else if (h.series && typeof h.series.setData === 'function') h.series.setData(data);
+};
+
+(async () => {
+  if (!id) return;
+  try {
+    const runs = await api.runs();
+    if (!runs || !runs.length) {
+      eqChartHost.innerHTML = '<div class="empty"><div>No persisted runs yet — start a simulation first.</div></div>';
+      return;
+    }
+    runs.sort((a, b) => String(b.started_at || '').localeCompare(String(a.started_at || '')));
+    const run = runs[0];
+    const res = await api.equity(run.run_id, id);
+    const points = (res && res.points) || [];
+    if (!points.length) {
+      eqChartHost.innerHTML = `<div class="empty"><div>No equity snapshots for <span class="mono">${esc(id)}</span> in run <span class="mono">${esc(run.run_id)}</span>.</div></div>`;
+      return;
+    }
+    document.getElementById('eq-meta').textContent =
+      `${run.run_id} · ${points.length} pts`;
+    eqChartHost.innerHTML = '';
+    const chart = charts.lineChart(eqChartHost, { color: tokenColor('--accent') });
+    setLineData(chart, points.map((p) => ({ time: Number(p[0]), value: Number(p[1]) })));
+  } catch (e) {
+    eqChartHost.innerHTML = `<div class="empty"><div>Failed to load equity.<br><span class="mono">${esc((e && e.message) || e)}</span></div></div>`;
+  }
+})();
+
+// ---- recent trades filtered to this agent ----------------------------------
+const trBody = document.getElementById('tr-body');
+const trEmpty = document.getElementById('tr-empty');
+const trCount = document.getElementById('tr-count');
+const TR_CAP = 200;
+let nTrades = 0;
+
+const trRow = (t) => {
+  const isBuy = t.buyer === id;
+  const side = isBuy ? 'BUY' : 'SELL';
+  const cp = isBuy ? t.seller : t.buyer;
+  return `<tr>
+    <td class="mono num-dim">${fmt.time(t.unix_time)}</td>
+    <td class="mono ${isBuy ? 'num-up' : 'num-down'}">${side}</td>
+    <td class="mono ${t.aggressor === 'BUY' ? 'num-up' : 'num-down'}">${fmt.inr(t.price)}</td>
+    <td class="mono num">${t.qty}</td>
+    <td class="mono">${esc(cp)}</td>
+  </tr>`;
+};
+
+const addTrade = (t, append) => {
+  if (!id || (t.buyer !== id && t.seller !== id)) return;
+  nTrades += 1;
+  if (append) trBody.insertAdjacentHTML('beforeend', trRow(t));
+  else trBody.insertAdjacentHTML('afterbegin', trRow(t));
+  while (trBody.children.length > TR_CAP) trBody.lastElementChild.remove();
+  trEmpty.hidden = true;
+  trCount.textContent = `${nTrades} fills`;
+};
+
+try {
+  const seed = (store.recentTrades && store.recentTrades(TR_CAP)) || [];
+  seed.slice().reverse().forEach((t) => addTrade(t, true));
+} catch (e) { /* fresh connection — live only */ }
+store.onTrade((t) => addTrade(t, false));
+
+// ---- connection dot --------------------------------------------------------
+const conn = document.getElementById('conn');
+const paintStatus = (s) => {
+  const on = s === true || s === 'connected' || (s && s.connected === true);
+  conn.classList.toggle('on', !!on);
+  conn.title = on ? 'connected' : 'disconnected';
+  conn.setAttribute('aria-label', on ? 'Feed connected' : 'Feed disconnected');
+};
+paintStatus(store.state.connected);
+store.onStatus(paintStatus);
+</script>
+</body>
+</html>

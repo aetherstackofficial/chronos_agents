@@ -1,0 +1,33 @@
+# Keeps secrets and local runtime junk out of every image built with `context: .`
+# (all Dockerfiles do `COPY swarm_orchestrator/ .`, which would otherwise drag these in).
+
+# Secrets -- the real GEMINI_API_KEY lives here; pass it at runtime via compose env instead.
+**/.env
+**/*.env
+**/.env.*
+!**/.env.example
+
+# VCS / tooling / other projects' output
+.git
+.gitignore
+.vscode
+graphify-out
+notebook
+venv
+**/node_modules
+frontend/dist
+*.pdf
+
+# Python caches
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+
+# Runtime data generated per-run -- each container creates its own, or uses the shared volume
+swarm_orchestrator/.strategies
+swarm_orchestrator/scripts_library
+swarm_orchestrator/data/scenarios
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.log

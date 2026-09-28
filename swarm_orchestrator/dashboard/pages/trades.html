@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chronos — Live Trade Tape</title>
+<link rel="stylesheet" href="../design-tokens.css">
+<style>
+.page{height:100vh;display:flex;flex-direction:column}
+.pop-head{flex:0 0 var(--topbar-h);display:flex;align-items:center;gap:var(--s-4);padding:0 var(--s-5);
+  border-bottom:1px solid var(--border);background:var(--bg-1)}
+.logo{font-weight:700;color:var(--text-hi);letter-spacing:.06em;font-size:var(--fs-md);text-decoration:none}
+.logo:hover{text-decoration:none}
+.logo .diamond{color:var(--accent-2)}
+.page-name{font-size:var(--fs-xs);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-mut)}
+.spacer{flex:1 1 auto}
+.conn-dot{width:9px;height:9px;border-radius:50%;background:var(--down);flex:0 0 auto;
+  transition:background var(--dur-2) var(--ease),box-shadow var(--dur-2) var(--ease)}
+.conn-dot.on{background:var(--live);box-shadow:0 0 8px var(--live)}
+main{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:var(--s-3);padding:var(--s-4)}
+.toolbar{display:flex;align-items:flex-end;gap:var(--s-3);flex-wrap:wrap}
+.toolbar label.field{width:150px}
+.toolbar .counts{margin-left:auto;font-size:var(--fs-sm);color:var(--text-mut)}
+.toolbar .counts .mono{color:var(--text-hi)}
+.tape{flex:1 1 auto;min-height:0}
+.tape .panel-body{padding:0}
+.tape-empty{padding:var(--s-8)}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="pop-head">
+    <a class="logo" href="../index.html" aria-label="Chronos home"><span class="diamond">◆</span> CHRONOS</a>
+    <span class="page-name">Live Trade Tape</span>
+    <span class="spacer"></span>
+    <span class="counts mono" id="head-count" aria-live="polite">0 prints</span>
+    <span class="conn-dot" id="conn" role="status" aria-label="Feed disconnected" title="disconnected"></span>
+  </header>
+  <main>
+    <div class="toolbar">
+      <label class="field">Side
+        <select class="select" id="f-side" aria-label="Filter by aggressor side">
+          <option value="ALL">All</option>
+          <option value="BUY">Buy</option>
+          <option value="SELL">Sell</option>
+        </select>
+      </label>
+      <label class="field">Agent
+        <input class="input mono" id="f-agent" placeholder="e.g. WHALE_0" aria-label="Filter by agent id">
+      </label>
+      <span class="counts"><span class="mono" id="vis-count">0</span> visible · capped at 500</span>
+      <button class="btn" id="dl-csv" aria-label="Download visible rows as CSV">⤓ Download CSV</button>
+    </div>
+    <div class="panel tape">
+      <div class="panel-head"><span>Prints — colored by real aggressor</span></div>
+      <div class="panel-body flush">
+        <table class="grid" aria-label="Live trades">
+          <thead>
+            <tr><th scope="col">Time</th><th scope="col">Price</th><th scope="col">Qty</th><th scope="col">Buyer</th><th scope="col">Seller</th></tr>
+          </thead>
+          <tbody id="tape-body"></tbody>
+        </table>
+        <div class="empty tape-empty" id="tape-empty">
+          <div>Waiting for prints…<br>Every row is a real fill from the matching engine, colored by the true aggressor side.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toasts"></div>
+
+<script type="module">
+import { store } from '../lib/store.js';
+import { fmt } from '../lib/format.js';
+import { ui } from '../lib/ui.js';
+
+const CAP = 500;
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
+const body = document.getElementById('tape-body');
+const emptyEl = document.getElementById('tape-empty');
+const headCount = document.getElementById('head-count');
+const visCount = document.getElementById('vis-count');
+const sideSel = document.getElementById('f-side');
+const agentInp = document.getElementById('f-agent');
+
+let buf = [];        // newest first, capped
+let total = 0;
+
+const match = (t) => {
+  const side = sideSel.value;
+  if (side !== 'ALL' && t.aggressor !== side) return false;
+  const q = agentInp.value.trim().toUpperCase();
+  if (q && !(String(t.buyer).toUpperCase().includes(q) || String(t.seller).toUpperCase().includes(q))) return false;
+  return true;
+};
+
+const rowHtml = (t) => `<tr>
+  <td class="mono num-dim">${fmt.time(t.unix_time)}</td>
+  <td class="mono ${t.aggressor === 'BUY' ? 'num-up' : 'num-down'}">${fmt.inr(t.price)}</td>
+  <td class="mono num">${t.qty}</td>
+  <td class="mono">${esc(t.buyer)}</td>
+  <td class="mono">${esc(t.seller)}</td>
+</tr>`;
+
+const updateCounts = () => {
+  headCount.textContent = `${total} prints`;
+  visCount.textContent = String(body.children.length);
+  emptyEl.hidden = body.children.length > 0;
+};
+
+const rebuild = () => {
+  const rows = buf.filter(match);
+  body.innerHTML = rows.map(rowHtml).join('');
+  updateCounts();
+};
+
+// seed from the shared ring buffer (if the shell already saw trades)
+try {
+  const seed = (store.recentTrades && store.recentTrades(CAP)) || [];
+  buf = seed.slice(-CAP).reverse();
+  total = buf.length;
+} catch (e) { /* fresh connection */ }
+rebuild();
+
+store.onTrade((t) => {
+  total += 1;
+  buf.unshift(t);
+  if (buf.length > CAP) buf.pop();
+  if (match(t)) {
+    body.insertAdjacentHTML('afterbegin', rowHtml(t));
+    while (body.children.length > CAP) body.lastElementChild.remove();
+  }
+  updateCounts();
+});
+
+sideSel.addEventListener('change', rebuild);
+agentInp.addEventListener('input', rebuild);
+
+document.getElementById('dl-csv').addEventListener('click', () => {
+  const rows = buf.filter(match);
+  if (!rows.length) { ui.toast('No visible rows to export', 'warn'); return; }
+  const q = (v) => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const csv = ['time,unix_time,price,qty,buyer,seller,aggressor']
+    .concat(rows.map((t) => [fmt.time(t.unix_time), t.unix_time, t.price, t.qty, t.buyer, t.seller, t.aggressor].map(q).join(',')))
+    .join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'chronos_trades.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  ui.toast(`Exported ${rows.length} rows`, 'good');
+});
+
+const conn = document.getElementById('conn');
+const paintStatus = (s) => {
+  const on = s === true || s === 'connected' || (s && s.connected === true);
+  conn.classList.toggle('on', !!on);
+  conn.title = on ? 'connected' : 'disconnected';
+  conn.setAttribute('aria-label', on ? 'Feed connected' : 'Feed disconnected');
+};
+paintStatus(store.state.connected);
+store.onStatus(paintStatus);
+</script>
+</body>
+</html>

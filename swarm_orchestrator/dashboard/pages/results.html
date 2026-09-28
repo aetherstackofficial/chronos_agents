@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chronos — Results</title>
+<link rel="stylesheet" href="../design-tokens.css">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+.page{height:100vh;display:flex;flex-direction:column}
+.pop-head{flex:0 0 var(--topbar-h);display:flex;align-items:center;gap:var(--s-4);padding:0 var(--s-5);
+  border-bottom:1px solid var(--border);background:var(--bg-1)}
+.logo{font-weight:700;color:var(--text-hi);letter-spacing:.06em;font-size:var(--fs-md);text-decoration:none}
+.logo:hover{text-decoration:none}
+.logo .diamond{color:var(--accent-2)}
+.page-name{font-size:var(--fs-xs);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--text-mut)}
+.spacer{flex:1 1 auto}
+.conn-dot{width:9px;height:9px;border-radius:50%;background:var(--down);flex:0 0 auto;
+  transition:background var(--dur-2) var(--ease),box-shadow var(--dur-2) var(--ease)}
+.conn-dot.on{background:var(--live);box-shadow:0 0 8px var(--live)}
+main{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(280px,340px) 1fr;gap:var(--s-4);padding:var(--s-4)}
+@media (max-width:900px){main{grid-template-columns:1fr;overflow:auto}}
+.rs-list .panel-body{padding:var(--s-2);display:flex;flex-direction:column;gap:var(--s-2)}
+.rs-item{display:flex;flex-direction:column;gap:3px;text-align:left;width:100%;cursor:pointer;
+  background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--s-3);
+  color:var(--text);font-family:var(--font);font-size:var(--fs-base);
+  transition:border-color var(--dur-1) var(--ease),background var(--dur-1) var(--ease)}
+.rs-item:hover{background:var(--bg-2);border-color:var(--border-strong)}
+.rs-item.sel{border-color:var(--accent);background:var(--accent-soft)}
+.rs-item .top{display:flex;align-items:center;gap:var(--s-2)}
+.rs-item .name{font-weight:600;color:var(--text-hi);flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rs-item .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--text-dim)}
+.rs-item .dot.running{background:var(--live);box-shadow:0 0 6px var(--live)}
+.rs-item .sub{font-size:var(--fs-xs);color:var(--text-mut);font-family:var(--mono)}
+.rs-detail{min-height:0;overflow:auto;display:flex;flex-direction:column;gap:var(--s-4)}
+.rs-head{display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap}
+.rs-head h2{font-size:var(--fs-lg);flex:1 1 auto}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:var(--s-3)}
+.chart-host{height:260px;min-height:0;position:relative}
+.chart-host .empty{position:absolute;inset:0}
+.tbl-panel .panel-body{padding:0}
+.day-sel{display:flex;align-items:center;gap:var(--s-2);text-transform:none;letter-spacing:0}
+.day-sel .select{width:auto;padding:4px 8px;font-size:var(--fs-sm)}
+.skel{height:64px}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="pop-head">
+    <a class="logo" href="../index.html" aria-label="Chronos home"><span class="diamond">◆</span> CHRONOS</a>
+    <span class="page-name">Strategy Results</span>
+    <span class="spacer"></span>
+    <span class="conn-dot" id="conn" role="status" aria-label="Feed disconnected" title="disconnected"></span>
+  </header>
+  <main>
+    <section class="panel rs-list">
+      <div class="panel-head"><span>Strategies</span><span class="actions"><button class="btn btn-sm btn-ghost" id="rs-refresh" aria-label="Refresh strategy list">↻</button></span></div>
+      <div class="panel-body" id="rs-list-body">
+        <div class="skeleton skel"></div>
+        <div class="skeleton skel"></div>
+        <div class="skeleton skel"></div>
+      </div>
+    </section>
+    <section class="rs-detail" id="rs-detail">
+      <div class="empty" style="min-height:300px">
+        <div>Select a strategy on the left.<br>Every table and number here is the strategy's real session record — trades, per-day outcomes, drawdowns — straight from the results store.</div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toasts"></div>
+
+<script type="module">
+import { store } from '../lib/store.js';
+import { api } from '../lib/api.js';
+import { fmt } from '../lib/format.js';
+import { ui } from '../lib/ui.js';
+import * as charts from '../lib/charts.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+const tokenColor = (name) =>
+  getComputedStyle(document.documentElement).getPropertyValue(name).trim() || undefined;
+const pctv = (x) => { const n = Number(x) || 0; return n <= 1 ? n * 100 : n; };
+const signCls = (n) => (n > 0 ? 'num-up' : (n < 0 ? 'num-down' : ''));
+const signed = (n) => (n >= 0 ? '+' : '') + fmt.inr(n);
+
+const listBody = document.getElementById('rs-list-body');
+const detailEl = document.getElementById('rs-detail');
+let selected = null;
+let chart = null;
+
+const disposeChart = () => {
+  if (!chart) return;
+  try {
+    if (typeof chart.dispose === 'function') chart.dispose();
+    else if (typeof chart.remove === 'function') chart.remove();
+    else if (chart.chart && typeof chart.chart.remove === 'function') chart.chart.remove();
+  } catch (e) { /* gone */ }
+  chart = null;
+};
+const setLineData = (h, data) => {
+  if (!h) return;
+  if (typeof h.setData === 'function') h.setData(data);
+  else if (h.series && typeof h.series.setData === 'function') h.series.setData(data);
+};
+
+// ---------------- list ------------------------------------------------------
+async function loadList(quiet) {
+  try {
+    const items = await api.results.list();
+    if (!items || !items.length) {
+      listBody.innerHTML = '<div class="empty" style="min-height:200px"><div>No strategies have run this session.<br>Run one from Strategies (or via the Copilot) and its results collect here live.</div></div>';
+      return;
+    }
+    listBody.innerHTML = items.map((s) => `
+      <button class="rs-item ${selected === s.strategy_id ? 'sel' : ''}" data-id="${esc(s.strategy_id)}" aria-label="Open results for ${esc(s.name)}">
+        <span class="top"><span class="dot ${s.status === 'running' ? 'running' : ''}" title="${esc(s.status)}"></span><span class="name">${esc(s.name)}</span></span>
+        <span class="sub">${esc(s.agent_id)}</span>
+        <span class="sub">${s.total_trades ?? 0} trades · <span class="${signCls(s.total_pnl)}">${signed(Number(s.total_pnl) || 0)}</span></span>
+      </button>`).join('');
+    listBody.querySelectorAll('.rs-item').forEach((btn) => {
+      btn.addEventListener('click', () => select(btn.dataset.id));
+    });
+  } catch (e) {
+    if (!quiet) {
+      listBody.innerHTML = `<div class="empty" style="min-height:200px"><div>Failed to load results.<br><span class="mono">${esc((e && e.message) || e)}</span></div></div>`;
+    }
+  }
+}
+
+// ---------------- detail ----------------------------------------------------
+async function select(sid) {
+  selected = sid;
+  listBody.querySelectorAll('.rs-item').forEach((b) => b.classList.toggle('sel', b.dataset.id === sid));
+  disposeChart();
+  detailEl.innerHTML = '<div class="skeleton" style="height:120px"></div><div class="skeleton" style="height:260px"></div><div class="skeleton" style="height:180px"></div>';
+  let d;
+  try {
+    d = await api.results.detail(sid);
+  } catch (e) {
+    detailEl.innerHTML = `<div class="empty" style="min-height:300px"><div>Failed to load strategy detail.<br><span class="mono">${esc((e && e.message) || e)}</span></div></div>`;
+    return;
+  }
+  if (selected !== sid) return;
+
+  const days = d.days || [];
+  const totTrades = d.total_trades ?? days.reduce((s, x) => s + (x.n_trades || 0), 0);
+  const wSum = days.reduce((s, x) => s + pctv(x.win_rate) * (x.n_trades || 0), 0);
+  const winRate = totTrades ? wSum / totTrades : 0;
+  const maxDD = days.reduce((m, x) => Math.max(m, pctv(x.max_drawdown)), 0);
+  const realized = Number(d.realized_pnl ?? d.total_pnl) || 0;
+
+  detailEl.innerHTML = `
+    <div class="rs-head">
+      <h2>${esc(d.name)}</h2>
+      <span class="chip">${esc(d.agent_id)}</span>
+      <span class="chip ${d.status === 'running' ? 'live' : ''}">${esc(d.status || 'stopped')}</span>
+      <button class="btn btn-sm" id="dl-trades">⤓ Trades CSV</button>
+      <button class="btn btn-sm" id="dl-outcomes">⤓ Outcomes CSV</button>
+      <button class="btn btn-sm btn-primary" id="dl-pdf">⤓ PDF Report</button>
+    </div>
+    <div class="stat-row">
+      <div class="card stat"><span class="k">Total Trades</span><span class="v">${totTrades}</span></div>
+      <div class="card stat"><span class="k">Realized P&amp;L</span><span class="v ${signCls(realized)}">${signed(realized)}</span></div>
+      <div class="card stat"><span class="k">Win Rate</span><span class="v">${fmt.num(winRate, 1)}%</span></div>
+      <div class="card stat"><span class="k">Days</span><span class="v">${d.n_days ?? days.length}</span></div>
+      <div class="card stat"><span class="k">Max Drawdown</span><span class="v ${maxDD > 0 ? 'num-down' : ''}">${fmt.num(maxDD, 2)}%</span></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span>Equity Curve</span><span class="actions mono" id="eq-meta"></span></div>
+      <div class="panel-body flush"><div class="chart-host" id="rs-chart"></div></div>
+    </div>
+    <div class="panel tbl-panel">
+      <div class="panel-head"><span>Per-Day Outcomes</span></div>
+      <div class="panel-body flush">
+        <table class="grid" aria-label="Per-day outcomes">
+          <thead><tr>
+            <th scope="col">Day</th><th scope="col">Run</th><th scope="col">Trades</th><th scope="col">Gross P&amp;L</th>
+            <th scope="col">Start → End Equity</th><th scope="col">Max DD</th><th scope="col">Win Rate</th>
+          </tr></thead>
+          <tbody>
+            ${days.length ? days.map((x) => `<tr>
+              <td class="mono">${x.day_count}</td>
+              <td class="mono num-dim" title="${esc(x.run_id)}">${esc(String(x.run_id || '').slice(0, 14))}</td>
+              <td class="mono">${x.n_trades ?? 0}</td>
+              <td class="mono ${signCls(x.gross_pnl)}">${signed(Number(x.gross_pnl) || 0)}</td>
+              <td class="mono">${fmt.inr(x.start_equity)} → ${fmt.inr(x.end_equity)}</td>
+              <td class="mono ${pctv(x.max_drawdown) > 0 ? 'num-down' : ''}">${fmt.num(pctv(x.max_drawdown), 2)}%</td>
+              <td class="mono">${fmt.num(pctv(x.win_rate), 1)}%</td>
+            </tr>`).join('') : '<tr><td colspan="7" class="num-dim">No completed day buckets yet — the current day closes at minute 375.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel tbl-panel">
+      <div class="panel-head">
+        <span>Trade Log</span>
+        <span class="actions day-sel">
+          <label for="day-filter">Day</label>
+          <select class="select mono" id="day-filter" aria-label="Filter trade log by day">
+            <option value="">All</option>
+            ${days.map((x) => `<option value="${x.day_count}">${x.day_count}</option>`).join('')}
+          </select>
+        </span>
+      </div>
+      <div class="panel-body flush">
+        <table class="grid" aria-label="Trade log">
+          <thead><tr>
+            <th scope="col">Time</th><th scope="col">Side</th><th scope="col">Price</th><th scope="col">Qty</th>
+            <th scope="col">Cash Δ</th><th scope="col">Counterparty</th>
+          </tr></thead>
+          <tbody id="trade-log"></tbody>
+        </table>
+        <div class="empty" id="log-empty" style="padding:var(--s-6)" hidden><div>No trades for this selection.</div></div>
+      </div>
+    </div>`;
+
+  // downloads — real files streamed by the bridge
+  document.getElementById('dl-trades').addEventListener('click', () => window.open(api.results.csvUrl(sid), '_blank'));
+  document.getElementById('dl-outcomes').addEventListener('click', () => window.open(api.results.outcomesCsvUrl(sid), '_blank'));
+  document.getElementById('dl-pdf').addEventListener('click', () => window.open(api.results.pdfUrl(sid), '_blank'));
+
+  // equity curve: prefer authoritative persisted snapshots for the newest run
+  const chartHost = document.getElementById('rs-chart');
+  let points = null;
+  const lastRun = days.length ? days[days.length - 1].run_id : null;
+  if (lastRun && d.agent_id) {
+    try {
+      const res = await api.equity(lastRun, d.agent_id);
+      if (res && res.points && res.points.length) {
+        points = res.points.map((p) => ({ time: Number(p[0]), value: Number(p[1]) }));
+        document.getElementById('eq-meta').textContent = `${lastRun} · ${points.length} pts`;
+      }
+    } catch (e) { /* fall back to per-day equity below */ }
+  }
+  if (!points && days.length) {
+    points = [];
+    days.forEach((x, i) => {
+      points.push({ time: i * 2, value: Number(x.start_equity) || 0 });
+      points.push({ time: i * 2 + 1, value: Number(x.end_equity) || 0 });
+    });
+    document.getElementById('eq-meta').textContent = 'per-day start/end equity';
+  }
+  if (points && points.length) {
+    try {
+      chart = charts.lineChart(chartHost, { color: tokenColor('--accent') });
+      setLineData(chart, points);
+    } catch (e) {
+      chartHost.innerHTML = `<div class="empty"><div>Chart failed: ${esc((e && e.message) || e)}</div></div>`;
+    }
+  } else {
+    chartHost.innerHTML = '<div class="empty"><div>No equity data yet — snapshots accumulate every tick while the strategy runs.</div></div>';
+  }
+
+  // trade log with day filter
+  const logBody = document.getElementById('trade-log');
+  const logEmpty = document.getElementById('log-empty');
+  const renderLog = async () => {
+    const dayVal = document.getElementById('day-filter').value;
+    let trades = [];
+    try {
+      const res = await api.results.trades(sid, dayVal === '' ? undefined : parseInt(dayVal, 10));
+      trades = (res && res.trades) || [];
+    } catch (e) {
+      // fallback: flatten from the detail we already have
+      trades = days
+        .filter((x) => dayVal === '' || String(x.day_count) === dayVal)
+        .flatMap((x) => x.trades || []);
+    }
+    logBody.innerHTML = trades.map((t) => `<tr>
+      <td class="mono num-dim">${t.unix_time ? fmt.time(t.unix_time) : esc(t.ts || '')}</td>
+      <td class="mono ${t.side === 'BUY' ? 'num-up' : 'num-down'}">${esc(t.side)}</td>
+      <td class="mono">${fmt.inr(t.price)}</td>
+      <td class="mono num">${t.qty}</td>
+      <td class="mono ${signCls(t.cash_delta)}">${signed(Number(t.cash_delta) || 0)}</td>
+      <td class="mono">${esc(t.counterparty)}</td>
+    </tr>`).join('');
+    logEmpty.hidden = trades.length > 0;
+  };
+  document.getElementById('day-filter').addEventListener('change', renderLog);
+  await renderLog();
+}
+
+// ---------------- boot ------------------------------------------------------
+document.getElementById('rs-refresh').addEventListener('click', () => loadList(false));
+await loadList(false);
+setInterval(() => loadList(true), 5000);
+
+// deep-link: results.html?sid=<strategy_id>
+const initial = new URLSearchParams(location.search).get('sid');
+if (initial) select(initial);
+
+const conn = document.getElementById('conn');
+const paintStatus = (s) => {
+  const on = s === true || s === 'connected' || (s && s.connected === true);
+  conn.classList.toggle('on', !!on);
+  conn.title = on ? 'connected' : 'disconnected';
+  conn.setAttribute('aria-label', on ? 'Feed connected' : 'Feed disconnected');
+};
+paintStatus(store.state.connected);
+store.onStatus(paintStatus);
+</script>
+</body>
+</html>

@@ -1,10 +1,34 @@
-﻿numpy==2.4.3
-pandas==3.0.1
-python-dateutil==2.9.0.post0
-pyzmq==25.1.2
-six==1.17.0
-tzdata==2025.3
-fastapi
-uvicorn[standard]
-google-genai
-python-dotenv
+# Chronos - complete, tested dependency manifest (Python 3.11+)
+# Core numerics & data
+numpy>=2.0
+pandas>=2.2
+sortedcontainers>=2.4
+
+# Networking / messaging
+pyzmq>=25.1
+
+# Machine learning (agent brains - inference; training uses the same stack)
+torch>=2.2
+stable-baselines3>=2.3
+gymnasium>=0.29
+
+# Web bridge (ASGI, async-native WebSockets)
+fastapi>=0.111
+uvicorn[standard]>=0.30
+
+# LLM macro oracle
+google-genai>=1.0
+
+# Strategy runner / FIX gateway
+simplefix>=1.0.17
+psutil>=5.9
+
+# Reporting (PDF trade/outcome reports)
+reportlab>=4.0
+
+# Configuration
+python-dotenv>=1.0
+
+# Testing
+pytest>=8.0
+httpx>=0.27

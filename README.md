@@ -1,70 +1,175 @@
-# Project Chronos: Distributed Market Digital Twin
+# Project Chronos — Reactive Market Digital Twin
 
-Project Chronos is a high-performance, distributed stock market simulation powered by Agent-Based Modeling and Deep Reinforcement Learning. It generates a living, reactive Level 2 Limit Order Book (LOB) populated by concurrent AI and algorithmic agents, providing a realistic sandbox for financial backtesting and market shock analysis.
+Chronos is a **counterfactual, impact-aware market simulator**. Instead of replaying a frozen
+historical tape and assuming your trades had no effect (the "price-taker fallacy" every classic
+backtester makes), Chronos runs a **living limit-order-book** populated by AI and rule-based
+agents. When your strategy submits an order, it matches against real resting liquidity, **moves
+the price**, and the agent population re-prices on the next tick. The backtest stops being *"what
+happened"* and becomes *"what would have happened, with you in it."*
 
-## 🚀 System Architecture
+> **Phase-2 status — honest snapshot.** This is a **single-node** system: four cooperating
+> processes on one machine, talking over ZeroMQ. It is not multi-datacenter "distributed." What
+> *is* true and working: the price is now **produced only by real trades in the order book** (no
+> random walk), market impact is **emergent from real depth consumption** (no magic constants),
+> the AI market-makers **quote from their trained models** (not random spreads), and a user can
+> **submit a strategy that trades as a first-class participant** (Pillar 2) against a **replay of
+> real history that diverges the moment they trade** (Pillar 1).
 
-Chronos abandons traditional static backtesting in favor of a distributed microservice architecture, now fully containerized via Docker. It operates via a pull-based **"Notice Board" Protocol** over TCP/IP, allowing independent agent swarms to run asynchronously across multiple Docker containers without suffering from OS-level CPU starvation or thread blocking.
+## Architecture — a two-plane exchange model
 
-### Core Microservices
-1. **The True Matching Engine:** An ultra-fast, native Python Limit Order Book that actively matches Bids and Asks based on price priority, manages partial fills, and generates real-time market state payloads.
-2. **The Agent Swarm:** 100 concurrent algorithmic agents (Market Makers, Whales, Retail) communicating via brokerless Inter-Process Communication (IPC) over ZeroMQ.
-3. **The FastAPI Bridge:** A high-speed asynchronous middleware layer that pulls state from the Engine at 20 frames-per-second and broadcasts it to the frontend via WebSockets.
-4. **The React UI Dashboard:** A stunning, interactive Vite/React frontend utilizing `lightweight-charts` to visualize real-time candlestick data, Order Book depth, Live Tape, and an Agent PnL Leaderboard.
-5. **The Macro Oracle:** An autonomous sentiment engine powered by the Google Gemini API (with a robust local heuristic fallback) that triggers exogenous market shocks based on injected breaking financial news.
+Chronos mirrors how a real exchange separates its network traffic:
 
-## 🛠️ Tech Stack
-
-* **Frontend:** React, Vite, Vanilla CSS, Lightweight-Charts
-* **Backend & API:** Python 3.11, FastAPI, WebSockets
-* **Networking Layer:** ZeroMQ (`pyzmq`) over TCP
-* **Machine Learning:** PyTorch, Stable-Baselines3 (PPO), OpenAI Gymnasium, Google GenAI SDK
-* **Infrastructure:** Docker, Docker Compose, Nginx
-
-## 🧠 The Agent Ecosystem
-
-The simulation is driven by three distinct classes of market participants, utilizing a **Shared Brain Pattern** to optimize RAM utilization across the distributed network. 
-
-* **Market Makers (15 Agents):** High-Frequency traders initialized with $1M–$5M capital. They dynamically adjust their Bid/Ask spreads based on inventory risk and Order Flow toxicity.
-* **Institutional Whales (4 Agents):** Smart money initialized with $5M–$20M capital. Trained via PPO to ride macroeconomic trends and execute massive block trades while utilizing a Hysteresis deadzone to minimize commission burn.
-* **The Retail Swarm (80 Agents):** Heuristic algorithms initialized with $10k–$100k capital simulating chaotic, emotional trading based on real-time RSI crossovers. Controlled by a **Liquidation Engine** that actively monitors cash balances, instantly liquidating and respawning bankrupt agents to guarantee continuous market liquidity.
-
-## 🌪️ Market Physics & Dynamics
-
-* **Time Physics & Pausing:** The Master Engine utilizes a deterministic physics loop that ticks exactly 1 simulated minute per second. The UI can instantly freeze the Master Clock, dynamically pausing the entire distributed Swarm safely.
-* **Baseline Brownian Noise:** The engine continuously injects randomized synthetic volume into the Order Flow Imbalance (OFI). This noise scales dynamically with overall market volume, perfectly mimicking the microscopic algorithmic jitter of a tier-1 exchange.
-* **Macro-Injections & Fallback Matrix:** The Gemini Oracle parses breaking news sentiment (-1.0 to +1.0) injected from the UI and slams the engine with massive liquidity sweeps on severe events. A robust local Fallback Matrix ensures 100% uptime even if the LLM API hits rate limits or internet connectivity drops.
-
-## 📦 Installation & Setup
-
-Chronos is entirely containerized. You no longer need to manually manage Python virtual environments, Node modules, or complex network ports.
-
-**1. Clone the repository:**
-```bash
-git clone https://github.com/aetherstackofficial/chronos_agents.git
-cd chronos_agents
+```
+  ORDER-ENTRY PLANE (reliable, TCP)          MARKET-DATA PLANE (push, one-to-many)
+  DEALER ──▶ engine ROUTER :5555             engine PUB :5556 ──▶ SUB subscribers
+  (agents, strategies, bridge, oracle,       (every book delta, trade print, and
+   FIX gateway — per-session identity,        event — sequence-numbered, like an
+   acks, sequence numbers — like FIX/TCP)     ITCH multicast feed, but over TCP)
 ```
 
-**2. Configure Environment Variables (Optional):**
+The oracle adds a **third bind point** — a *service* socket rather than a plane. The bridge asks
+it to score a headline; it answers, and when the news is material it submits its own orders to the
+engine like any other participant:
 
-Create a .env file in the root directory to supply your Google Gemini API key for the Oracle. If left blank, the Oracle will automatically use the Local Heuristic Fallback Engine.
-```bash
-GEMINI_API_KEY=your_gemini_api_key_here
+```
+  bridge DEALER "BRIDGE_ORACLE" ──▶ oracle ROUTER :5557
+                                      └─▶ DEALER "GEMINI_ORACLE" ──▶ engine ROUTER :5555
 ```
 
-**3. Build and Launch the Distributed Network:**
+| Port | Socket | Bound by | Carries |
+|------|--------|----------|---------|
+| `5555` | `ROUTER` | engine | order entry + control — per-session identity, one ack per request |
+| `5556` | `PUB` | engine | market data — `tick` / `trade` / `event`, sequence-numbered |
+| `5557` | `ROUTER` | oracle | news-scoring requests from the bridge |
+| `8000` | HTTP/WS | bridge | dashboard, REST API, and the WebSocket fan-out of `5556` |
+
+All four are overridable via `ZMQ_ORDER_PORT` / `ZMQ_DATA_PORT` / `ORACLE_PORT` / `BRIDGE_PORT`
+(see [`.env.example`](swarm_orchestrator/.env.example)).
+
+- **Engine** (`engine/`) — a single-threaded, deterministic, **sequenced** matching core
+  (price-time priority, real depth, SQLite persistence). Determinism = replayable runs.
+- **Swarm** (`worker.py`, `core/`, `agents/`) — 15 PPO market-makers + 4 PPO whales + 80
+  heuristic retail, **push-driven** (subscribe to data, submit orders concurrently over a pooled
+  gateway — no more one-at-a-time serial loop).
+- **Runner** (`runner/`) — Pillar 2: a strategy **SDK** (`on_tick(state) -> orders`), a
+  **sandbox** (Docker / resource-guarded subprocess), and a **FIX 4.4 gateway**.
+- **Bridge** (`bridge.py`) — FastAPI + native WebSockets (ASGI, async — no thread-unsafe
+  sockets), serves the dashboard and the REST/WS API.
+- **Oracle** (`oracle.py`) — an **async** Gemini macro-news engine with a **real** local fallback
+  scorer (keyword-polarity matrix), sizing shocks from actual book depth (not magic constants).
+  Both a server (`ROUTER :5557`) and a client (`DEALER` into the engine) — the bridge never scores
+  news itself and never publishes on the data plane.
+- **Dashboard** (`dashboard/`) — a professional trading terminal (MARKET / STRATEGY / RUNS tabs).
+
+The full interface contract is **[`swarm_orchestrator/PROTOCOL.md`](swarm_orchestrator/PROTOCOL.md)** —
+every message schema, port, and invariant. Read it before changing any interface.
+
+## Tech stack
+
+Python 3.11+ · ZeroMQ (ROUTER/DEALER + PUB/SUB) · PyTorch + Stable-Baselines3 (PPO) ·
+Gymnasium · FastAPI + Uvicorn · SQLite · Google GenAI (Gemini) · simplefix · lightweight-charts
++ Monaco.
+
+## Setup
+
+```bash
+python -m venv venv
+venv\Scripts\activate            # Windows   (source venv/bin/activate on Unix)
+cd swarm_orchestrator
+pip install -r requirements.txt
+cp .env.example .env             # then edit .env — add your GEMINI_API_KEY
+```
+
+> **Security:** never commit `.env`. It is gitignored. A previously-committed key must be treated
+> as compromised — rotate it and purge it from git history (`git filter-repo` / BFG).
+
+## Running
+
+Each component is its own process. From `swarm_orchestrator/`, in separate terminals:
+
+```bash
+# 1 · The matching engine (order plane :5555, data plane :5556)
+python -m engine.server
+
+# 2 · The AI swarm  (15 MM + 4 whales + 80 retail)
+python main.py                    #  == python worker.py --role all
+#     or run a single cohort:  python worker.py --role mm --count 15
+
+# 3 · The web bridge + dashboard   ->  http://localhost:8000
+python bridge.py
+
+# 4 · The Gemini macro-oracle
+python oracle.py
+
+# optional · institutional FIX gateway (:9878)
+python -m runner.fix_gateway
+```
+
+Open **http://localhost:8000**, set a symbol & price, and **START SIMULATION**. Inject a news
+headline to watch the oracle gap the book. Load a historical CSV under **REPLAY** to run
+Pillar-1 mode; submit a strategy under the **STRATEGY** tab (Pillar 2).
+
+## Testing
+
+```bash
+cd swarm_orchestrator
+python -m pytest -q                      # unit + integration suite
+python scripts/smoke_e2e.py              # end-to-end: boots the engine, drives both planes
+```
+
+The suite guards the Phase-2 promises: order-book price-time priority, **ledger conservation**,
+**price is book-driven only**, **deterministic runs under a fixed seed**, the **replay→reactive
+latch**, and the oracle's real fallback matrix.
+
+## What changed from Phase 1
+
+| Phase-1 (demo) | Phase-2 (this build) |
+|---|---|
+| Price = `random.gauss` on every fetch | Price = **last real trade** in the book |
+| Impact = one magic constant, book wiped on >50k | **Emergent** from real depth consumption |
+| MM quoted **random** spreads | MM quotes from its **trained PPO** 3-D action |
+| Retail traded **random** 1–20 shares | Retail sizes by heuristic **conviction** |
+| 99 agents **pulled** state over one shared socket | Agents **subscribe** to a pushed feed, submit concurrently |
+| Flask-SocketIO, thread-unsafe socket | FastAPI + async WebSockets, single event loop |
+| No persistence | SQLite runs / ticks / trades / equity |
+| No way for a user to trade | Strategy **SDK + sandbox + FIX gateway** (Pillar 2) |
+| — | **History-repeater** replay that latches to reactive (Pillar 1) |
+| Broken `run_*.py`, dead code, leaked key | Parameterized `worker.py`, cleaned, key untracked |
+
+## Roadmap (not yet in this build)
+
+- **Model retraining** (real RSI feature, best-checkpoint selection, multi-asset) — deferred.
+- **New product features** (Monte-Carlo counterfactual fan, adversarial red-team agent, LLM
+  strategy copilot, crisis "time machine") — deferred.
+- **Calibration study** (simulated vs realised impact) and true multi-node distribution.
+
+See `Chronos_Phase2_Master_Plan.html` for the complete plan.
+
+## Docker & the two front-ends
+
+The Docker track and the Vite/React `frontend/` were built in parallel against the old Phase-1
+`true_engine.py`, before this Phase-2 rewrite landed, and were merged in once both branches were
+reconciled. What that merge settled:
+
+- **Backend is this build's.** Push-based PUB/SUB two-plane transport, `DEALER` + `asyncio.Lock`
+  control sockets, and no synthesized OHLC — price and bars come only from real fills
+  (PROTOCOL §8.1). The parallel branch's REQ/REP polling bridge and its `random.uniform` candle
+  jitter were both dropped by agreement.
+- **Containers point at the real services.** `Dockerfile.engine` ran `python true_engine.py`,
+  which no longer exists — repointed at `python -m engine.server`. The other four (`bridge`,
+  `oracle`, `agents`, `frontend`) already matched this build's entry points.
+- **`frontend/` is not wired to PROTOCOL.md yet.** It still opens `ws://localhost:8000/ws` and
+  sends `{"action": "start_sim", ...}` — the old bridge's contract. This build expects REST for
+  control (`POST /api/sim/start|stop`, `/api/news`, …) and `{"topic","data"}` envelopes over `/ws`
+  for market data. Rewiring it is owned by the author of the React app.
+
+**Direction:** React becomes the primary shell over time, with the V2 feature views (copilot,
+Monte-Carlo, time machine, script library, results/PDF) ported across incrementally. Until that
+port is done, `swarm_orchestrator/dashboard/` remains the full-featured UI and the bridge keeps
+serving it — the bridge container copies `swarm_orchestrator/`, so both UIs ship side by side.
+
 ```bash
 docker-compose up --build
 ```
-Docker will automatically build the React frontend, setup Nginx, download the Python ML environments, and orchestrate all 5 microservices in the correct dependency order.
-
-## 🖥️ Running the Simulation
-
-Once the Docker containers are running, the entire Chronos ecosystem is online.
-
-1. Open your browser and navigate to: http://localhost:3000
-2. Input your desired Asset ticker and Starting Price in the Header.
-3. Click START SIMULATION to ignite the Master Engine and unleash the Swarm.
-4. Type breaking financial news into the Injector input and click INJECT NEWS to watch the Oracle crash or pump the market in real-time.
-
-Built for advanced distributed systems research, ML architectural design, and algorithmic trading simulations.
+brings up `engine`, `oracle`, `swarm`, `bridge` (REST/WS API + the full dashboard on `:8000`), and
+`frontend` (the React shell on `:3000`, pending the protocol rewire).

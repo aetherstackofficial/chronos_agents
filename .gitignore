@@ -3,7 +3,7 @@ venv/
 __pycache__/
 *.pyc
 
-# Node
+# Node (frontend/)
 node_modules/
 dist/
 build/
@@ -13,3 +13,21 @@ build/
 *.env
 .env.*
 swarm_orchestrator/.env
+
+# Runtime artifacts (never commit)
+swarm_orchestrator/.strategies/
+swarm_orchestrator/scripts_library/
+swarm_orchestrator/data/scenarios/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Notebook: the HTML source is tracked, the rendered PDF is a build artifact
+# (it lives on the OneDrive Desktop -- see notebook/build.py)
+notebook/*.pdf
+graphify-out/
+tech_stack_rationale.html
+
+# Generated video projects (renders + audio are large build artifacts, ~66 MB)
+videos/
