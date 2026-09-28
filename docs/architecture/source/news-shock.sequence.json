@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "News ka safar — headline se shock tak",
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "viewBox": [
+      1080,
+      590
+    ],
+    "legend": {
+      "entries": {
+        "dashed": {
+          "label": "AI call / wake-up"
+        }
+      }
+    }
+  },
+  "participants": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "Dashboard",
+      "sublabel": "Ingest News"
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "Web API",
+      "sublabel": "bridge.py"
+    },
+    {
+      "id": "oracle",
+      "type": "backend",
+      "label": "News Scorer",
+      "sublabel": "oracle.py :5557"
+    },
+    {
+      "id": "gemini",
+      "type": "external",
+      "label": "Gemini",
+      "sublabel": "2.5-flash",
+      "brand": "google-gemini"
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Engine",
+      "sublabel": ":5555 / :5556"
+    },
+    {
+      "id": "swarm",
+      "type": "backend",
+      "label": "AI bots",
+      "sublabel": "worker.py"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 258,
+      "label": "1 · Headline bhejo"
+    },
+    {
+      "from": 268,
+      "to": 372,
+      "label": "2 · Score + size"
+    },
+    {
+      "from": 382,
+      "to": 520,
+      "label": "3 · Shock + reaction"
+    }
+  ],
+  "messages": [
+    {
+      "id": "post-news",
+      "from": "browser",
+      "to": "bridge",
+      "y": 165,
+      "label": "POST /api/news",
+      "variant": "emphasis"
+    },
+    {
+      "id": "to-oracle",
+      "from": "bridge",
+      "to": "oracle",
+      "y": 193,
+      "label": "NEWS {headline}",
+      "variant": "default"
+    },
+    {
+      "id": "accepted",
+      "from": "oracle",
+      "to": "bridge",
+      "y": 221,
+      "label": "accepted (turant)",
+      "variant": "return"
+    },
+    {
+      "id": "accepted-ui",
+      "from": "bridge",
+      "to": "browser",
+      "y": 249,
+      "label": "accepted",
+      "variant": "return"
+    },
+    {
+      "id": "fetch-state",
+      "from": "oracle",
+      "to": "engine",
+      "y": 280,
+      "label": "FETCH_STATE",
+      "variant": "default"
+    },
+    {
+      "id": "state",
+      "from": "engine",
+      "to": "oracle",
+      "y": 308,
+      "label": "price + order book",
+      "variant": "return"
+    },
+    {
+      "id": "ask-gemini",
+      "from": "oracle",
+      "to": "gemini",
+      "y": 336,
+      "label": "score? (8s timeout)",
+      "variant": "dashed"
+    },
+    {
+      "id": "score",
+      "from": "gemini",
+      "to": "oracle",
+      "y": 364,
+      "label": "−1 … +1 + reason",
+      "variant": "return"
+    },
+    {
+      "id": "child-1",
+      "from": "oracle",
+      "to": "engine",
+      "y": 395,
+      "label": "MARKET #1 + meta.news",
+      "variant": "emphasis"
+    },
+    {
+      "id": "news-event",
+      "from": "engine",
+      "to": "bridge",
+      "y": 423,
+      "label": "event: news",
+      "variant": "default"
+    },
+    {
+      "id": "wake-bots",
+      "from": "engine",
+      "to": "swarm",
+      "y": 451,
+      "label": "event → sab jaago",
+      "variant": "dashed"
+    },
+    {
+      "id": "ws-card",
+      "from": "bridge",
+      "to": "browser",
+      "y": 479,
+      "label": "WebSocket: news card",
+      "variant": "emphasis"
+    },
+    {
+      "id": "children",
+      "from": "oracle",
+      "to": "engine",
+      "y": 507,
+      "label": "MARKET #2, #3 (1s gap)",
+      "variant": "default"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "bridge",
+      "from": 160,
+      "to": 485,
+      "type": "backend"
+    },
+    {
+      "participant": "oracle",
+      "from": 188,
+      "to": 513,
+      "type": "backend"
+    },
+    {
+      "participant": "gemini",
+      "from": 331,
+      "to": 370,
+      "type": "external"
+    },
+    {
+      "participant": "engine",
+      "from": 275,
+      "to": 513,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Kya hota hai",
+      "items": [
+        "Oracle turant accepted bolta; kaam alag task mein, agli headline nahi rukti",
+        "Engine se price + top-10 book depth leta hai",
+        "Score −1..+1; |score| < 0.1 → kuch nahi"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Size kaise",
+      "items": [
+        "total = max(500, |score| × 1.5 × visible depth)",
+        "Score > 0 BUY, < 0 SELL; 3 hisse, 1 sec gap",
+        "Pehle order par meta.news → engine news event pehle"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Gemini fail ho to",
+      "items": [
+        "No key / 8s timeout → offline keyword scorer (not se ulta) + sector check",
+        "256 headlines ka cache",
+        "News par bots 60 tick tak 100% jaagte hain"
+      ]
+    }
+  ]
+}

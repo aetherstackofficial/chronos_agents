@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="hi-Latn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chronos Diagrams</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #14181f; --muted: #5b6474; --line: #e2e6ec;
+    --accent: #0f766e; --warn-bg: #fff7ed; --warn-line: #fdba74; --warn-ink: #9a3412;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1116; --panel: #161b22; --ink: #e6edf3; --muted: #9aa4b2; --line: #2a313c;
+      --accent: #2dd4bf; --warn-bg: #2a1c10; --warn-line: #9a5b1f; --warn-ink: #fdba74;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 36px 16px 56px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 28px; max-width: 760px; }
+  h2 { font-size: 17px; margin: 32px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  a.card { display: block; text-decoration: none; color: inherit; background: var(--panel);
+           border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  a.card:hover, a.card:focus-visible { border-color: var(--accent); outline: none; }
+  .num { font: 600 12px ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--accent); }
+  .card h3 { margin: 4px 0 6px; font-size: 16px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; }
+  .type { display: inline-block; margin-top: 10px; font: 12px ui-monospace, SFMono-Regular, Consolas, monospace;
+          color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+  .notes { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 6px 20px; }
+  .notes li { margin: 10px 0; }
+  .notes b { color: var(--warn-ink); }
+  code { font: 13px ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .foot { color: var(--muted); font-size: 13px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chronos — poora project, 8 diagrams mein</h1>
+  <p class="lead">Upar se neeche is order mein padho. Pehla diagram poora map hai, baaki har ek ek hissa andar se kholta hai.
+  Har box par <code>SRC</code> badge click karo to GitHub par wahi code line khulti hai.</p>
+
+  <h2>Padhne ka order</h2>
+  <div class="grid">
+    <a class="card" href="1-overview.html">
+      <div class="num">01</div><h3>Overview</h3>
+      <p>Kaun sa program kisse baat karta hai: browser, Web API, engine, bots, strategy, FIX, News Scorer, Gemini. Trust boundaries bhi.</p>
+      <span class="type">architecture</span></a>
+    <a class="card" href="2-engine-internals.html">
+      <div class="num">02</div><h3>Matching Engine ke andar</h3>
+      <p>Order inbox → handler → order book → fill settle → price broadcast. Har second ka clock, house liquidity, replayer, SQLite.</p>
+      <span class="type">architecture</span></a>
+    <a class="card" href="3-order-journey.html">
+      <div class="num">03</div><h3>Ek order ka safar</h3>
+      <p>Aapki strategy ka order step-by-step: tick → on_tick → ORDER → match → ACK → on_fill → dashboard.</p>
+      <span class="type">sequence</span></a>
+    <a class="card" href="4-replay-latch.html">
+      <div class="num">04</div><h3>REPLAY → REACTIVE (latch)</h3>
+      <p>Project ka main idea: market history chalata hai, aur aapka pehla trade hote hi aap par react karne lagta hai.</p>
+      <span class="type">lifecycle</span></a>
+    <a class="card" href="5-swarm-brains.html">
+      <div class="num">05</div><h3>AI bots kaise decide karte hain</h3>
+      <p>99 bots: 6 numbers dekh kar PPO market makers, whales, rule-based retail aur red-team apne orders banate hain.</p>
+      <span class="type">dataflow</span></a>
+    <a class="card" href="6-news-shock.html">
+      <div class="num">06</div><h3>News ka safar</h3>
+      <p>Headline → News Scorer → Gemini score → book depth se size → 3 market orders → news event → bots jaagte hain.</p>
+      <span class="type">sequence</span></a>
+    <a class="card" href="7-extra-tools.html">
+      <div class="num">07</div><h3>Extra Tools</h3>
+      <p>Copilot → Script Library → Strategy Runner → Results → CSV/PDF. Saath mein Monte Carlo, Time Machine, Narrator.</p>
+      <span class="type">architecture</span></a>
+    <a class="card" href="8-docker-deployment.html">
+      <div class="num">08</div><h3>Docker deployment</h3>
+      <p>5 containers, ports, shared volume — aur Docker setup ki kamiyaan jo code padh kar mili.</p>
+      <span class="type">architecture</span></a>
+  </div>
+
+  <h2>Code padhte waqt mili zaroori baatein</h2>
+  <div class="notes"><ul>
+    <li><b>Engine abhi crash karega:</b> <code>engine/server.py</code> mein aapka local (uncommitted) edit <code>init_sim</code> line comment karta hai,
+        lekin agli <code>logger.info(...)</code> line abhi bhi <code>run_id</code> use karti hai → start par <code>NameError</code>.</li>
+    <li><b>Docker mein Gemini sirf News Scorer ko milta hai:</b> <code>docker-compose.yml</code> mein <code>GEMINI_API_KEY</code> sirf <code>oracle</code> ko diya hai,
+        isliye bridge ke Copilot aur Narrator Docker mein hamesha offline fallback par chalte hain.</li>
+    <li><b>Docker mein strategy sandbox nahi:</b> bridge container mein docker CLI nahi hai, to user code subprocess mein chalta hai (sirf memory/CPU guard, security nahi).
+        Local Docker mode mein bhi container <code>--network host</code> par chalta hai.</li>
+    <li><b>Time Machine ka data generate kiya hua hai:</b> 5 crisis tapes code khud banata hai (crisis jaisi shape), ye asli market data nahi hai.</li>
+    <li><b>Monte Carlo ki limit 400 hai:</b> <code>run_fan</code> ka <code>max_paths=400</code> (default 60) — protocol doc aur explainer video mein 500 likha hai.</li>
+    <li><b>Results sirf memory mein:</b> bridge restart hote hi Results Store khali; scripts files bachte hain lekin Docker volume par nahi hain.</li>
+  </ul></div>
+
+  <p class="foot">Sab diagrams commit <code>8494770</code> ke code se banaye gaye hain. Source JSON <code>source/</code> mein, browser check ke screenshots <code>checks/</code> mein.</p>
+</main>
+</body>
+</html>

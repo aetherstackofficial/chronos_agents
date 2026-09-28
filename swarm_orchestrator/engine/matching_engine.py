@@ -43,26 +43,6 @@ class MatchingEngine:
     RSI_PERIOD = 14
     VOLUME_MA_WINDOW = 20
     LIQUIDATION_THRESHOLD = 1000.0            # §8.6 retail equity floor
-    # U-shape intraday activity curve: u = U_BASE + U_AMPL * t^2.
-    U_BASE = 0.2
-    U_AMPL = 2.3
-    U_MIDPOINT = 187.5
-    # Regime physics (§8.3).
-    REGIME_CHOICES = ("BULL", "BEAR", "RANGING")
-    REGIME_WEIGHTS = (0.4, 0.4, 0.2)
-    REGIME_MIN_TICKS = 60
-    REGIME_MAX_TICKS = 180
-    INITIAL_REGIME_TICKS = 60
-    GHOST_TREND_PROB = 0.5
-    GHOST_TREND_MIN_QTY = 300
-    GHOST_TREND_MAX_QTY = 1000
-    REVERSAL_PROB = 0.3
-    REVERSAL_MIN_QTY = 2500
-    REVERSAL_MAX_QTY = 5000
-    REVERSAL_MIN_TICKS = 30                   # regime length after a bounce
-    REVERSAL_MAX_TICKS = 90
-    ROUND_LEVEL = 5.0                         # ₹5 psychological levels
-    LEVEL_BAND = 0.20
     # Designated liquidity (§8.4).
     LP_AGENT = "SIM_LP"
     LP_LEVELS = 8
@@ -109,9 +89,9 @@ class MatchingEngine:
         self.market_minute = 0
         self.day_count = 1
         self.sim_unix_time = self.SIM_EPOCH
+        # "RANGING" until the replay latch (if any) honestly infers a label
+        # from real close drift (§9) — nothing randomly drives this anymore.
         self.regime = "RANGING"
-        self.regime_ticks_left = self.INITIAL_REGIME_TICKS
-        self.u_shape = self.U_BASE + self.U_AMPL  # value at minute 0
         self.agent_ledger: Dict[str, dict] = {}
         # order_id -> {"agent_id", "expiry_tick": int | None}; None = day order.
         self._resting: Dict[int, dict] = {}
@@ -269,7 +249,6 @@ class MatchingEngine:
         """
         self.mode = "REACTIVE"
         self.regime = self._infer_regime()
-        self.regime_ticks_left = self.INITIAL_REGIME_TICKS
         pubs.append(("event", {"seq": self._next_seq(), "kind": "mode_change",
                                "mode": "REACTIVE",
                                "trigger_agent": trigger_agent}))
@@ -381,6 +360,11 @@ class MatchingEngine:
         if not isinstance(msg, dict):
             return self._reject("malformed message"), pubs
         mtype = msg.get("msg")
+
+        # Paused ka matlab hai market band. START/RESUME se pehle koi trade nahi.
+        if self.paused and mtype in ("ORDER", "CANCEL", "CANCEL_ALL"):
+            return self._reject("market is paused"), pubs
+
         if mtype == "ORDER":
             return self._handle_order(msg, pubs)
         if mtype == "CANCEL":
@@ -551,10 +535,13 @@ class MatchingEngine:
     def physics_tick(self) -> List[Publication]:
         """One physics tick = one sim-minute.
 
-        Clock advance, regime flow (or replay drive), SIM_LP refresh, TTL
-        expiry, bar close, liquidation sweep, persistence flush. Always ends
-        with one ('tick', §5.1 payload). When paused, only the tick snapshot
-        is emitted — no clock/flow advance.
+        Clock advance, replay drive (if any), SIM_LP refresh, TTL expiry, bar
+        close, liquidation sweep, persistence flush. LIVE/REACTIVE has no
+        synthetic order flow of its own — price moves only from real agent
+        orders (swarm, user strategies, oracle) hitting SIM_LP's resting
+        liquidity or each other. Always ends with one ('tick', §5.1 payload).
+        When paused, only the tick snapshot is emitted — no clock/flow
+        advance.
         """
         if self.paused:
             bar = self._last_bar or dict(self.current_bar)
@@ -563,8 +550,6 @@ class MatchingEngine:
         pubs: List[Publication] = []
         self.tick_count += 1
         self._advance_clock(pubs)
-        self._update_u_shape()
-        self._update_regime()
 
         was_replay = self.mode == "REPLAY"
         if was_replay and self.replayer is not None:
@@ -574,7 +559,6 @@ class MatchingEngine:
                 # swarm inherits a quoted book with no gap.
                 self._refresh_sim_lp(pubs)
         else:
-            self._ghost_flow(pubs)
             self._refresh_sim_lp(pubs)
 
         self._expire_ttl()
@@ -604,61 +588,6 @@ class MatchingEngine:
             logger.info("session roll: day %d open", self.day_count)
         else:
             self.sim_unix_time += self.SECONDS_PER_MINUTE
-
-    def _update_u_shape(self) -> None:
-        t = (self.market_minute - self.U_MIDPOINT) / self.U_MIDPOINT
-        self.u_shape = self.U_BASE + self.U_AMPL * (t * t)
-
-    def _update_regime(self) -> None:
-        self.regime_ticks_left -= 1
-        if self.regime_ticks_left <= 0:
-            self.regime = self.rng.choices(
-                list(self.REGIME_CHOICES),
-                weights=list(self.REGIME_WEIGHTS))[0]
-            self.regime_ticks_left = self.rng.randint(
-                self.REGIME_MIN_TICKS, self.REGIME_MAX_TICKS)
-            logger.info("regime shift -> %s for %d ticks",
-                        self.regime, self.regime_ticks_left)
-
-    def _ghost_flow(self, pubs: List[Publication]) -> None:
-        """Regime physics inject FLOW, not price (§8.3): real market orders
-        through the normal matching path, sized by the U-shape curve."""
-        if self.regime == "BULL" and self.rng.random() < self.GHOST_TREND_PROB:
-            qty = int(self.rng.randint(self.GHOST_TREND_MIN_QTY,
-                                       self.GHOST_TREND_MAX_QTY) * self.u_shape)
-            if qty > 0:
-                self.submit_flow_order("GHOST_TREND", "BUY", "MARKET",
-                                       qty, None, pubs)
-        elif self.regime == "BEAR" and self.rng.random() < self.GHOST_TREND_PROB:
-            qty = int(self.rng.randint(self.GHOST_TREND_MIN_QTY,
-                                       self.GHOST_TREND_MAX_QTY) * self.u_shape)
-            if qty > 0:
-                self.submit_flow_order("GHOST_TREND", "SELL", "MARKET",
-                                       qty, None, pubs)
-
-        # Level-bounce near round ₹5 levels: a real reversal order + regime flip.
-        level = round(self.last_price / self.ROUND_LEVEL) * self.ROUND_LEVEL
-        distance = self.last_price - level
-        if (self.regime == "BEAR" and 0 < distance < self.LEVEL_BAND
-                and self.rng.random() < self.REVERSAL_PROB):
-            qty = int(self.rng.randint(self.REVERSAL_MIN_QTY,
-                                       self.REVERSAL_MAX_QTY) * self.u_shape)
-            if qty > 0:
-                self.submit_flow_order("GHOST_REVERSAL", "BUY", "MARKET",
-                                       qty, None, pubs)
-            self.regime = "BULL"
-            self.regime_ticks_left = self.rng.randint(
-                self.REVERSAL_MIN_TICKS, self.REVERSAL_MAX_TICKS)
-        elif (self.regime == "BULL" and -self.LEVEL_BAND < distance < 0
-                and self.rng.random() < self.REVERSAL_PROB):
-            qty = int(self.rng.randint(self.REVERSAL_MIN_QTY,
-                                       self.REVERSAL_MAX_QTY) * self.u_shape)
-            if qty > 0:
-                self.submit_flow_order("GHOST_REVERSAL", "SELL", "MARKET",
-                                       qty, None, pubs)
-            self.regime = "BEAR"
-            self.regime_ticks_left = self.rng.randint(
-                self.REVERSAL_MIN_TICKS, self.REVERSAL_MAX_TICKS)
 
     def _refresh_sim_lp(self, pubs: List[Publication],
                         reference: Optional[float] = None) -> None:

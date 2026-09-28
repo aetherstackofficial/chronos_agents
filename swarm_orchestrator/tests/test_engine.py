@@ -93,17 +93,30 @@ def test_unknown_message_rejected():
 
 # --- Determinism ---------------------------------------------------------------
 
+def _drive_with_real_orders(e, ticks=60):
+    """Advance ``ticks`` physics ticks, with a real external aggressor
+    crossing the spread every 10th tick (fixed schedule/side/qty -- no
+    randomness of its own). The engine no longer moves price on its own
+    (no ghost/regime flow); this mimics an agent or user strategy actually
+    trading, which is the only thing allowed to move price now."""
+    prices = []
+    for i in range(ticks):
+        pubs = e.physics_tick()
+        if i % 10 == 5:
+            side = "BUY" if (i // 10) % 2 == 0 else "SELL"
+            e.handle_message({"msg": "ORDER", "agent_id": "TEST_AGGRESSOR",
+                              "action": side, "type": "MARKET", "qty": 500})
+        tick = [p for t, p in pubs if t == "tick"][0]
+        prices.append(tick["last_price"])
+    return prices
+
+
 def test_same_seed_same_run():
     """§8.7: identical seed + identical inputs ⇒ identical price path."""
     def run(seed):
         e = MatchingEngine()
         e.init_sim("TCS", "TECH", 190.0, seed=seed)
-        prices = []
-        for _ in range(60):
-            pubs = e.physics_tick()
-            tick = [p for t, p in pubs if t == "tick"][0]
-            prices.append(tick["last_price"])
-        return prices
+        return _drive_with_real_orders(e)
 
     assert run(123) == run(123)
 
@@ -112,10 +125,12 @@ def test_different_seed_diverges():
     def run(seed):
         e = MatchingEngine()
         e.init_sim("TCS", "TECH", 190.0, seed=seed)
-        for _ in range(60):
-            e.physics_tick()
+        _drive_with_real_orders(e)
         return e.last_price
-    # Overwhelmingly likely to differ; if identical the RNG isn't wired to price flow.
+    # Same fixed order schedule on both runs; only the engine's own seeded
+    # rng (SIM_LP's bid/ask level & size jitter, §8.4) differs, so the
+    # aggressor's MARKET orders execute at a different price. Overwhelmingly
+    # likely to differ; if identical the RNG isn't wired to SIM_LP placement.
     assert run(1) != run(999)
 
 

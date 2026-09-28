@@ -27,10 +27,10 @@ logger = logging.getLogger("engine.server")
 POLL_TIMEOUT_MS = 50
 TICK_INTERVAL_S = 1.0
 # Auto-init defaults so the engine is immediately alive (INIT_SIM re-inits).
-DEFAULT_SYMBOL = "TCS"
-DEFAULT_SECTOR = "TECH"
-DEFAULT_PRICE = 190.0
-DEFAULT_SEED = 42
+# DEFAULT_SYMBOL = "TCS"
+# DEFAULT_SECTOR = "TECH"
+# DEFAULT_PRICE = 190.0
+# DEFAULT_SEED = 42
 
 
 def _publish(pub: zmq.Socket, pubs: List[Tuple[str, dict]]) -> None:
@@ -74,11 +74,13 @@ def main() -> None:
 
     db = Persistence()
     engine = MatchingEngine(db=db)
-    run_id = engine.init_sim(DEFAULT_SYMBOL, DEFAULT_SECTOR, DEFAULT_PRICE,
-                             seed=DEFAULT_SEED)
-    logger.info("engine online: ROUTER tcp://%s:%s | PUB tcp://%s:%s | %s",
-                host, order_port, host, data_port, run_id)
+    # run_id = engine.init_sim(DEFAULT_SYMBOL, DEFAULT_SECTOR, DEFAULT_PRICE,
+    #                          seed=DEFAULT_SEED)
+    logger.info("engine online: ROUTER tcp://%s:%s | PUB tcp://%s:%s | idle (start ka intezaar)",
+                host, order_port, host, data_port)
 
+
+    engine.paused = True
     poller = zmq.Poller()
     poller.register(router, zmq.POLLIN)
     next_tick = time.monotonic() + TICK_INTERVAL_S

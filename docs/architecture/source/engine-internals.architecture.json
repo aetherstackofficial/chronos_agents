@@ -1,0 +1,409 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Matching Engine ke andar",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1180,
+      660
+    ],
+    "repository": {
+      "url": "https://github.com/the-steelix-flame/chronos",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "84947702191e8cc2eedf846701cee3c5146a5d1d"
+    }
+  },
+  "components": [
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite Saver",
+      "sublabel": "persistence.py · WAL",
+      "brand": "sqlite",
+      "pos": [
+        510,
+        510
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/persistence.py",
+          "line": 16,
+          "label": "4 tables"
+        }
+      ]
+    },
+    {
+      "id": "timer",
+      "type": "backend",
+      "label": "1-second Clock",
+      "sublabel": "physics_tick()",
+      "pos": [
+        270,
+        510
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/matching_engine.py",
+          "line": 551,
+          "label": "physics_tick"
+        }
+      ]
+    },
+    {
+      "id": "mood",
+      "type": "backend",
+      "label": "Market Mood Flow",
+      "sublabel": "BULL/BEAR ghost orders",
+      "pos": [
+        270,
+        90
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/matching_engine.py",
+          "line": 623,
+          "label": "_ghost_flow"
+        }
+      ]
+    },
+    {
+      "id": "lp",
+      "type": "backend",
+      "label": "House Liquidity",
+      "sublabel": "SIM_LP · ~8 levels/side",
+      "pos": [
+        510,
+        90
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/matching_engine.py",
+          "line": 663,
+          "label": "_refresh_sim_lp"
+        }
+      ]
+    },
+    {
+      "id": "replayer",
+      "type": "backend",
+      "label": "History Replayer",
+      "sublabel": "replay.py · CSV bars",
+      "pos": [
+        750,
+        90
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/replay.py",
+          "label": "HistoricalReplayer"
+        }
+      ]
+    },
+    {
+      "id": "senders",
+      "type": "external",
+      "label": "Order bhejne wale",
+      "sublabel": "bots · strategy · FIX · news",
+      "pos": [
+        30,
+        510
+      ],
+      "size": [
+        150,
+        70
+      ]
+    },
+    {
+      "id": "inbox",
+      "type": "messagebus",
+      "label": "Order Inbox",
+      "sublabel": "ROUTER :5555",
+      "pos": [
+        30,
+        300
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/server.py",
+          "line": 70,
+          "label": "ROUTER bind"
+        }
+      ]
+    },
+    {
+      "id": "handler",
+      "type": "backend",
+      "label": "Message Handler",
+      "sublabel": "handle_message()",
+      "pos": [
+        270,
+        300
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/matching_engine.py",
+          "line": 378,
+          "label": "handle_message"
+        }
+      ]
+    },
+    {
+      "id": "book",
+      "type": "database",
+      "label": "Order Book",
+      "sublabel": "book.py · price-time",
+      "pos": [
+        510,
+        300
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/book.py",
+          "label": "OrderBook"
+        }
+      ]
+    },
+    {
+      "id": "settle",
+      "type": "backend",
+      "label": "Fill Settler",
+      "sublabel": "_apply_fill()",
+      "pos": [
+        750,
+        300
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/matching_engine.py",
+          "line": 217,
+          "label": "_apply_fill"
+        }
+      ]
+    },
+    {
+      "id": "pub",
+      "type": "messagebus",
+      "label": "Price Broadcaster",
+      "sublabel": "PUB :5556",
+      "pos": [
+        990,
+        300
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/server.py",
+          "line": 72,
+          "label": "PUB bind"
+        }
+      ]
+    },
+    {
+      "id": "ledger",
+      "type": "database",
+      "label": "Agent Ledgers",
+      "sublabel": "har agent ka cash + pos",
+      "pos": [
+        750,
+        510
+      ],
+      "size": [
+        150,
+        70
+      ],
+      "sources": [
+        {
+          "path": "swarm_orchestrator/engine/matching_engine.py",
+          "line": 205,
+          "label": "_ensure_agent"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Engine process (server.py) — single thread",
+      "wraps": [
+        "mood",
+        "lp",
+        "replayer",
+        "inbox",
+        "handler",
+        "book",
+        "settle",
+        "pub",
+        "timer",
+        "db",
+        "ledger"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Clock har second inhe chalata hai",
+      "wraps": [
+        "mood",
+        "lp",
+        "replayer"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "send",
+      "from": "senders",
+      "to": "inbox",
+      "label": "ORDER / CANCEL",
+      "variant": "emphasis"
+    },
+    {
+      "id": "decode",
+      "from": "inbox",
+      "to": "handler",
+      "label": "JSON",
+      "variant": "emphasis"
+    },
+    {
+      "id": "match",
+      "from": "handler",
+      "to": "book",
+      "label": "match / rest",
+      "variant": "emphasis"
+    },
+    {
+      "id": "fills",
+      "from": "book",
+      "to": "settle",
+      "label": "fills",
+      "variant": "emphasis"
+    },
+    {
+      "id": "print",
+      "from": "settle",
+      "to": "pub",
+      "label": "trade",
+      "variant": "emphasis"
+    },
+    {
+      "id": "transfer",
+      "from": "settle",
+      "to": "ledger",
+      "label": "cash/pos move",
+      "labelDy": 34
+    },
+    {
+      "id": "save",
+      "from": "timer",
+      "to": "db",
+      "label": "save"
+    },
+    {
+      "id": "ghost",
+      "from": "mood",
+      "to": "book",
+      "label": "ghost orders",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "quotes",
+      "from": "lp",
+      "to": "book",
+      "label": "quotes",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 34
+    },
+    {
+      "id": "history",
+      "from": "replayer",
+      "to": "book",
+      "label": "o→h→l→c",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "snapshot",
+      "from": "timer",
+      "to": "pub",
+      "label": "tick snapshot",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Order ka raasta",
+      "items": [
+        "ROUTER sender ko identity se pehchanta (MM_3, STRAT_ab12, FIX_x)",
+        "Check: qty > 0, LIMIT par price; price 0.05 tick par round",
+        "Strict price-time match; MARKET ka bacha hissa cancel",
+        "Har request ka 1 ACK: FILLED/PARTIAL/RESTING/REJECTED + cash/pos"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Price kahan se",
+      "items": [
+        "Sirf trade se: _apply_fill() hi last_price badalta",
+        "Bada order kai levels khaata → impact apne aap",
+        "VWAP, RSI(14), OFI, OHLC — sab asli trades se"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Har second clock",
+      "items": [
+        "+1 min (375 min/din), regime BULL/BEAR/RANGING",
+        "REPLAY → replayer; warna ghost flow + SIM_LP quotes",
+        "TTL cancel, bar close, retail < ₹1,000 → ₹50k reset",
+        "Tick publish + SQLite save"
+      ]
+    }
+  ]
+}
