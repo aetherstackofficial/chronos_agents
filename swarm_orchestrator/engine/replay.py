@@ -18,7 +18,7 @@ import csv
 import logging
 from typing import TYPE_CHECKING, List, Tuple
 
-from .book import TICK_SIZE, round_to_tick
+from .book import round_to_tick
 
 if TYPE_CHECKING:  # avoid a runtime circular import
     from .matching_engine import MatchingEngine
@@ -145,11 +145,11 @@ class HistoricalReplayer:
         orders resting inside the walked range fill for real on the way.
         """
         engine = self.engine
-        target = round_to_tick(target)
-        last = round_to_tick(engine.last_price)
+        target = round_to_tick(target, engine.tick)
+        last = round_to_tick(engine.last_price, engine.tick)
         engine.flush_agent_orders(self.LP_AGENT)
 
-        if abs(target - last) < TICK_SIZE / 2:
+        if abs(target - last) < engine.tick / 2:
             # Flat leg: print volume at the current price.
             engine.submit_flow_order(self.LP_AGENT, "SELL", "LIMIT",
                                      child_qty, target, pubs,
@@ -174,13 +174,14 @@ class HistoricalReplayer:
     def _ladder_prices(self, last: float, target: float) -> List[float]:
         """Tick prices from just past last_price to the target (inclusive),
         evenly thinned to at most MAX_WALK_LEVELS so big gaps stay cheap."""
-        n_ticks = int(round(abs(target - last) / TICK_SIZE))
+        tick = self.engine.tick
+        n_ticks = int(round(abs(target - last) / tick))
         n_levels = min(max(n_ticks, 1), self.MAX_WALK_LEVELS)
         step = (target - last) / n_levels
         prices: List[float] = []
         seen: set = set()
         for i in range(1, n_levels + 1):
-            px = round_to_tick(last + step * i)
+            px = round_to_tick(last + step * i, tick)
             if px not in seen and px > 0:
                 seen.add(px)
                 prices.append(px)

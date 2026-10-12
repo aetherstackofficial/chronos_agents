@@ -36,7 +36,12 @@ services:
       - ZMQ_HOST=engine
       - ZMQ_ORDER_PORT=5555
       - ORACLE_PORT=5557
+      # Scoring tiers 1 and 2. Read from the host env (or the root .env) at
+      # `up` time only -- .dockerignore keeps every .env out of the image, so
+      # no key is ever baked into a layer.
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-}
     depends_on:
       engine:
         condition: service_healthy

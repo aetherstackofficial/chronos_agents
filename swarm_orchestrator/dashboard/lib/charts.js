@@ -86,7 +86,10 @@ export function candleChart(el) {
   const candles = chart.addCandlestickSeries({
     upColor: up, downColor: down, borderVisible: false,
     wickUpColor: up, wickDownColor: down,
-    priceFormat: { type: 'price', precision: 2, minMove: 0.05 },
+    // The engine's tick varies by price band (PROTOCOL 5.1 `tick_size`), so use
+    // the finest possible step here -- a hardcoded 0.05 would round a valid
+    // low-priced tick away and flatten the candles into horizontal lines.
+    priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
   });
   candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } });
 

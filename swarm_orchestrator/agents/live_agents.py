@@ -99,12 +99,21 @@ class _LiveAgentBase:
         last_trade: wall-clock time of the last emitted action (cooldowns).
     """
 
+    # Hard position cap, ± shares. Subclasses set it from their own capacity;
+    # 0 means "no cap". This is a risk limit, not a model output: a real market
+    # maker is blocked by its risk desk regardless of what its strategy wants.
+    max_position: int = 0
+
     def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
         self.cash: float = 0.0
         self.inventory: int = 0
         self.is_asleep: bool = False
         self.last_trade: float = 0.0
+        # Baseline for the port_return observation (slot 6). Unknown until the
+        # engine seeds our ledger on the first ack; 0.0 (the training mean) is
+        # sent until then.
+        self.start_equity: "float | None" = None
 
     def on_tick(self, tick: dict) -> "list[dict]":
         """Return this tick's orders (§4.1 minus msg/agent_id). Override."""
@@ -118,6 +127,31 @@ class _LiveAgentBase:
         pos = ack.get("pos")
         if pos is not None:
             self.inventory = int(pos)
+
+    def _port_return(self, tick: dict) -> float:
+        """Portfolio return vs. our starting equity — observation slot 6.
+
+        Matches UniversalMarketEnv._get_obs: (value - start) / start.
+        """
+        price = float(tick["last_price"])
+        equity = self.cash + self.inventory * price
+        if self.start_equity is None:
+            if self.cash <= 0:
+                return 0.0          # ledger not seeded yet
+            self.start_equity = equity
+        if not self.start_equity:
+            return 0.0
+        return (equity - self.start_equity) / self.start_equity
+
+    def _cap_qty(self, side: str, qty: int) -> int:
+        """Clamp ``qty`` so a full fill keeps the position within ±max_position."""
+        if self.max_position <= 0 or qty <= 0:
+            return max(0, qty)
+        if side == "BUY":
+            room = self.max_position - self.inventory
+        else:
+            room = self.max_position + self.inventory
+        return max(0, min(qty, int(room)))
 
 
 class LiveMarketMaker(_LiveAgentBase):
@@ -137,6 +171,7 @@ class LiveMarketMaker(_LiveAgentBase):
     def __init__(self, agent_id: str) -> None:
         super().__init__(agent_id)
         self.max_capacity = random.randint(5_000, 25_000)
+        self.max_position = self.max_capacity
 
     def on_tick(self, tick: dict) -> "list[dict]":
         if self.is_asleep:
@@ -145,7 +180,7 @@ class LiveMarketMaker(_LiveAgentBase):
         if now - self.last_trade < self.COOLDOWN_S:
             return []
 
-        obs = build_observation(tick, self.inventory, self.max_capacity)
+        obs = build_observation(tick, self._port_return(tick))
         norm_obs = mm_norm_env.normalize_obs(obs)
         action, _ = mm_model.predict(norm_obs, deterministic=True)
         a = action[0]
@@ -158,14 +193,21 @@ class LiveMarketMaker(_LiveAgentBase):
         bid_price = round(mid * (1.0 - bid_bps / 10_000.0), 2)
         ask_price = round(mid * (1.0 + ask_bps / 10_000.0), 2)
 
+        # Each side is capped independently: a one-sided fill is what actually
+        # blows the position out, so the bid can only buy up to the long room
+        # and the ask can only sell up to the short room.
+        bid_qty = self._cap_qty("BUY", quote_qty)
+        ask_qty = self._cap_qty("SELL", quote_qty)
+
         self.last_trade = now
-        return [
-            {"cancel_all": True},
-            {"action": "BUY", "type": "LIMIT", "price": bid_price,
-             "qty": quote_qty, "tif_ticks": self.QUOTE_TIF_TICKS},
-            {"action": "SELL", "type": "LIMIT", "price": ask_price,
-             "qty": quote_qty, "tif_ticks": self.QUOTE_TIF_TICKS},
-        ]
+        orders: "list[dict]" = [{"cancel_all": True}]
+        if bid_qty > 0:
+            orders.append({"action": "BUY", "type": "LIMIT", "price": bid_price,
+                           "qty": bid_qty, "tif_ticks": self.QUOTE_TIF_TICKS})
+        if ask_qty > 0:
+            orders.append({"action": "SELL", "type": "LIMIT", "price": ask_price,
+                           "qty": ask_qty, "tif_ticks": self.QUOTE_TIF_TICKS})
+        return orders
 
 
 class LiveWhaleAgent(_LiveAgentBase):
@@ -182,6 +224,7 @@ class LiveWhaleAgent(_LiveAgentBase):
     def __init__(self, agent_id: str) -> None:
         super().__init__(agent_id)
         self.max_capacity = random.randint(50_000, 200_000)
+        self.max_position = self.max_capacity
 
     def on_tick(self, tick: dict) -> "list[dict]":
         if self.is_asleep:
@@ -190,7 +233,7 @@ class LiveWhaleAgent(_LiveAgentBase):
         if now - self.last_trade < self.COOLDOWN_S:
             return []
 
-        obs = build_observation(tick, self.inventory, self.max_capacity)
+        obs = build_observation(tick, self._port_return(tick))
         norm_obs = whale_norm_env.normalize_obs(obs)
         action, _ = whale_model.predict(norm_obs, deterministic=True)
 
@@ -201,9 +244,13 @@ class LiveWhaleAgent(_LiveAgentBase):
         if delta == 0:
             return []
 
-        self.last_trade = now
         side = "BUY" if delta > 0 else "SELL"
-        return [{"action": side, "type": "MARKET", "qty": abs(delta)}]
+        qty = self._cap_qty(side, abs(delta))
+        if qty == 0:
+            return []
+
+        self.last_trade = now
+        return [{"action": side, "type": "MARKET", "qty": qty}]
 
 
 class LiveRetailAgent(_LiveAgentBase):
@@ -241,8 +288,9 @@ class LiveRetailAgent(_LiveAgentBase):
         if last_price <= 0:
             return []
 
-        # Retail normalises position by its own bankroll (capacity proxy).
-        obs = build_observation(tick, self.inventory, max(self.cash, 1.0))
+        # The heuristic only reads rsi_norm and ofi, but build the observation
+        # the same way as the PPO agents so the layout stays consistent.
+        obs = build_observation(tick, self._port_return(tick))
         action, _ = retail_model.predict(obs)
         raw = float(action[0][0])
         conviction = abs(raw)
