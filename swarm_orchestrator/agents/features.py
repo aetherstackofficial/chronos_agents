@@ -14,16 +14,25 @@ guards the training env itself uses (vwap <= 0, volume_ma <= 0).
 import numpy as np
 
 
-def build_observation(tick: dict, inventory: int, max_capacity: float) -> np.ndarray:
+def build_observation(tick: dict, port_return: float) -> np.ndarray:
     """Build the (1, 6) float32 observation the PPO/heuristic brains expect.
 
     Layout (identical to UniversalMarketEnv._get_obs):
-        [vwap_dist, volatility, volume_ratio, rsi_norm, ofi, pos_norm]
+        [vwap_dist, volatility, volume_ratio, rsi_norm, ofi, port_return]
+
+    Slot 6 is PORTFOLIO RETURN, not position. This used to send
+    ``inventory / max_capacity``, which is a different quantity on a different
+    scale: training saw values around ±0.02 (std 0.0103 in the saved
+    VecNormalize stats) while a live inventory ratio reached -2.63, i.e. -257
+    std, so VecNormalize clipped it to -10 on every tick and the models were
+    blind to that input. The mismatch was inherited from the old arena code
+    (market_simulator/run_arena.py), not introduced here.
 
     Args:
         tick: full engine tick snapshot (PROTOCOL.md §5.1).
-        inventory: the agent's current signed position (shares).
-        max_capacity: the agent's position-normalisation denominator (> 0).
+        port_return: (equity - starting equity) / starting equity, matching
+            UniversalMarketEnv._get_obs. Pass 0.0 (the training mean) while the
+            agent's starting equity is still unknown.
 
     Returns:
         np.ndarray of shape (1, 6), dtype float32, NaN/inf scrubbed.
@@ -37,10 +46,9 @@ def build_observation(tick: dict, inventory: int, max_capacity: float) -> np.nda
     volume_ratio = float(tick["step_volume"]) / volume_ma if volume_ma > 0 else 1.0
     rsi_norm = float(tick["rsi"]) / 100.0
     ofi = float(tick["ofi"])
-    pos_norm = float(inventory) / float(max_capacity)
 
     obs = np.array(
-        [[vwap_dist, volatility, volume_ratio, rsi_norm, ofi, pos_norm]],
+        [[vwap_dist, volatility, volume_ratio, rsi_norm, ofi, float(port_return)]],
         dtype=np.float32,
     )
     return np.nan_to_num(obs)
