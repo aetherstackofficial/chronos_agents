@@ -39,6 +39,7 @@ import sys
 from collections import OrderedDict
 from typing import Any, Optional
 
+import httpx
 import zmq
 import zmq.asyncio
 from dotenv import load_dotenv
@@ -56,9 +57,26 @@ ZMQ_HOST = os.getenv("ZMQ_HOST", "127.0.0.1")
 ZMQ_ORDER_PORT = os.getenv("ZMQ_ORDER_PORT", "5555")
 ORACLE_PORT = os.getenv("ORACLE_PORT", "5557")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_TIMEOUT = 8.0        # LLM scoring budget before falling back
+GEMINI_MODEL = "gemini-3.5-flash"
+GEMINI_TIMEOUT = 20.0       # LLM scoring budget before falling back. Measured
+                            # 10-13 s on gemini-3.5-flash under load, so 8 s
+                            # (Phase-1 value) silently forced the lexicon path.
+                            # Safe to be generous: scoring runs in a background
+                            # task, the NEWS caller is already acked (section 5.4).
+
+# Groq = SECOND LLM tier, tried only when Gemini fails. Gemini's free tier is
+# 20 requests/day/model, so a demo exhausts it and every later headline would
+# otherwise drop to the lexicon. Groq's API is OpenAI-compatible, so this is a
+# plain httpx POST -- no extra dependency. GROQ_MODEL is env-overridable
+# because Groq rotates its production model roster.
+# `or` not a getenv default: compose passes GROQ_MODEL="" when the host has not
+# set it, and an empty model id would 404 on every request.
+GROQ_MODEL = os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_TIMEOUT = 20.0
+
 ENGINE_TIMEOUT = 5.0        # engine FETCH_STATE / ORDER ack budget
 MIN_IMPACT = 0.1            # |score| below this -> no intervention
 MIN_TOTAL_QTY = 500         # floor so a thin book still prints a visible shock
@@ -208,6 +226,86 @@ def fallback_score(headline: str, symbol: str, sector: str) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# Shared LLM prompt + reply parsing (used by BOTH the Gemini and Groq tiers)   #
+# --------------------------------------------------------------------------- #
+def _build_prompt(headline: str, symbol: str, price: float, sector: str) -> str:
+    """The scoring prompt, shared by every LLM tier.
+
+    It anchors the MIDDLE of the scale, not only the extremes: the headline is
+    first classified by scope (company / sector / macro / irrelevant), each
+    scope carries a realistic single-session move range, and the score is that
+    move divided by 20. The Phase-1 prompt gave only the +/-20% endpoints, so
+    the model answered +/-0.8 for ordinary news and every headline became a
+    crash.
+
+    ONE prompt for both tiers is deliberate: a Gemini score and a Groq score
+    have to be comparable, otherwise the same headline would shock the book by
+    a different amount depending on which provider's quota happened to be left.
+    """
+    return f"""
+You are a senior equity analyst on a trading desk. Estimate the REALISTIC
+price reaction of ONE stock to a news headline within a single session.
+
+News Headline: "{headline}"
+Target Stock: "{symbol}"
+Target Sector: "{sector}"
+Current Stock Price: {price}
+
+Step 1 - Classify the scope of the news:
+  A. COMPANY-SPECIFIC: names "{symbol}" or is directly about its business.
+  B. SECTOR-WIDE: affects the whole "{sector}" sector, company not named.
+  C. MACRO / OTHER SECTOR: general economy, or a different sector only.
+  D. IRRELEVANT: no plausible link to this stock.
+
+Step 2 - Estimate the expected move in percent. Typical ranges:
+  D: about 0%
+  C: 0% to 1.5%
+  B: 1% to 4%
+  A, routine (earnings beat/miss, order win, upgrade/downgrade, guidance): 3% to 7%
+  A, extreme and rare (fraud, bankruptcy, regulator ban, takeover bid,
+     major disaster): 8% to 20%
+Most headlines are ordinary. Do NOT choose an extreme unless the headline
+clearly describes a rare, company-defining event. Reduce the magnitude by
+about half for hedged or uncertain wording ("reportedly", "may", "plans to",
+"rumour") or for news that is old or already widely expected.
+
+Step 3 - Convert to a score:
+  impact_score = expected_move_percent / 20, negative if bearish.
+  Examples: +4% -> 0.20, -7% -> -0.35, +1.5% -> 0.075, +/-20% -> +/-1.0.
+Use the full range of values; do not default to round numbers like 0.5 or 0.9.
+
+Respond ONLY with a valid JSON object. Do not include any markdown formatting.
+Format exactly like this:
+{{
+    "inferred_sector": "<string>",
+    "impact_score": <float between -1.0 and 1.0>,
+    "relevance": <boolean>,
+    "reasoning": "<1-2 sentences: scope (A/B/C/D), expected move percent, why>"
+}}
+"""
+
+
+def _parse_llm_json(raw: str, source: str) -> dict:
+    """Turn one raw LLM reply into the score dict.
+
+    Strips markdown fences defensively (models add them despite the
+    instruction). Raises ``ValueError``/``TypeError`` on a malformed reply --
+    the callers catch that and move to the next tier.
+    """
+    cleaned = raw.strip().replace("```json", "").replace("```", "").strip()
+    data = json.loads(cleaned)
+    score = float(data.get("impact_score", 0.0))
+    if not data.get("relevance", False):
+        score = 0.0
+    return {
+        "score": max(-1.0, min(1.0, score)),
+        "sector": str(data.get("inferred_sector", "UNKNOWN")),
+        "reasoning": str(data.get("reasoning", "No reasoning provided.")),
+        "source": source,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Oracle service                                                               #
 # --------------------------------------------------------------------------- #
 class Oracle:
@@ -227,13 +325,22 @@ class Oracle:
                 from google import genai  # local import: optional dependency
 
                 self._gemini = genai.Client()
-                log.info("Gemini client ready (model %s)", GEMINI_MODEL)
+                log.info("Tier 1 Gemini ready (model %s)", GEMINI_MODEL)
             except Exception as exc:  # pragma: no cover - bad key / missing pkg
-                log.warning("Gemini client unavailable (%s); fallback-only mode", exc)
+                log.warning("Tier 1 Gemini unavailable (%s)", exc)
         else:
+            log.warning("Tier 1 Gemini disabled (GEMINI_API_KEY not set)")
+
+        if GROQ_API_KEY:
+            log.info("Tier 2 Groq ready (model %s)", GROQ_MODEL)
+        else:
+            log.warning("Tier 2 Groq disabled (GROQ_API_KEY not set)")
+
+        if self._gemini is None and not GROQ_API_KEY:
             log.warning(
-                "GEMINI_API_KEY not set -- running in fallback-only mode "
-                "(deterministic lexicon scoring; fully functional, no LLM)."
+                "No LLM tier available -- lexicon-only mode. Scoring still "
+                "works, but any wording outside the 41-keyword lexicon scores "
+                "0.00 and produces no market intervention."
             )
 
     # ---------------------------------------------------------------- engine #
@@ -263,14 +370,24 @@ class Oracle:
     ) -> dict:
         """Score ``headline`` against ``symbol``; never raises.
 
-        Primary path: Gemini (async, 8 s budget). On timeout, API error or a
-        malformed response the deterministic :func:`fallback_score` matrix is
-        used instead. Results are LRU-cached by ``(headline, symbol)`` so a
-        repeated injection does not re-bill the API.
+        Three tiers, each tried only if the one before it failed:
+
+        1. **Gemini** (:meth:`_score_gemini`) -- best quality, but the free
+           tier is 20 requests/day/model.
+        2. **Groq** (:meth:`_score_groq`) -- same prompt, different provider,
+           so an exhausted Gemini quota no longer kills LLM scoring.
+        3. **Lexicon** (:func:`fallback_score`) -- deterministic, offline,
+           always available, but blind to any wording outside its 41 keywords.
+
+        Both LLM tiers share one prompt so their scores stay comparable.
+        LLM results are LRU-cached by ``(headline, symbol)``, so a repeated
+        injection costs no quota and returns the identical score. Lexicon
+        results are NOT cached: they mean something failed, and a retry should
+        get a real chance at the LLM again.
 
         :returns: ``{"score", "sector", "reasoning", "source"}`` with
             ``score`` clamped to ``[-1, 1]`` and ``source`` one of
-            ``"gemini" | "fallback"``.
+            ``"gemini" | "groq" | "fallback"``.
         """
         key = (headline.lower().strip(), symbol)
         cached = self._cache.get(key)
@@ -281,7 +398,9 @@ class Oracle:
 
         result: Optional[dict] = None
         if self._gemini is not None:
-            result = await self._score_gemini(headline, symbol, price)
+            result = await self._score_gemini(headline, symbol, price, sector)
+        if result is None and GROQ_API_KEY:
+            result = await self._score_groq(headline, symbol, price, sector)
         if result is None:
             score = fallback_score(headline, symbol, sector)
             result = {
@@ -289,44 +408,28 @@ class Oracle:
                 "sector": sector,
                 "reasoning": (
                     "Deterministic lexicon/sector fallback matrix "
-                    f"(score {score:+.2f}; Gemini unavailable or failed)."
+                    f"(score {score:+.2f}; every LLM tier unavailable or failed)."
                 ),
                 "source": "fallback",
             }
 
-        self._cache[key] = result
-        if len(self._cache) > CACHE_SIZE:
-            self._cache.popitem(last=False)
+        # Cache LLM answers ONLY. A "fallback" result means every LLM tier
+        # failed (no key, spent quota, DNS down) -- caching it would pin the
+        # lexicon's answer, often 0.00, to this headline for the life of the
+        # process, so re-injecting the same headline would not even retry the
+        # LLM. Transient failures must not become permanent ones.
+        if result["source"] != "fallback":
+            self._cache[key] = result
+            if len(self._cache) > CACHE_SIZE:
+                self._cache.popitem(last=False)
         return result
 
-    async def _score_gemini(self, headline: str, symbol: str, price: float) -> Optional[dict]:
-        """LLM scoring path. Returns ``None`` on any failure (caller falls back)."""
-        prompt = f"""
-You are an expert quantitative analyst and risk manager.
-Evaluate the impact of the following breaking news on a specific publicly traded company.
-
-News Headline: "{headline}"
-Target Stock: "{symbol}"
-Current Stock Price: {price}
-
-Instructions:
-1. Identify the primary industry sector of "{symbol}".
-2. Determine if the news affects this specific company (either directly or via a macro sector shock).
-3. Assign an impact score between -1.0 and 1.0.
-   * 1.0 represents an extreme euphoric event causing a maximum +20% surge in stock price.
-   * -1.0 represents a catastrophic event causing a maximum -20% crash in stock price.
-   * 0.0 means the news is completely irrelevant to the stock.
-
-Respond ONLY with a valid JSON object. Do not include any markdown formatting.
-Format exactly like this:
-{{
-    "inferred_sector": "<string>",
-    "impact_score": <float between -1.0 and 1.0>,
-    "relevance": <boolean>,
-    "reasoning": "<1-2 sentences explaining why>"
-}}
-"""
+    async def _score_gemini(
+        self, headline: str, symbol: str, price: float, sector: str
+    ) -> Optional[dict]:
+        """Tier 1: Gemini. Returns ``None`` on any failure (caller tries Groq)."""
         assert self._gemini is not None
+        prompt = _build_prompt(headline, symbol, price, sector)
         try:
             response = await asyncio.wait_for(
                 self._gemini.aio.models.generate_content(
@@ -334,24 +437,56 @@ Format exactly like this:
                 ),
                 timeout=GEMINI_TIMEOUT,
             )
-            raw = (response.text or "").strip()
-            raw = raw.replace("```json", "").replace("```", "").strip()
-            data = json.loads(raw)
-            score = float(data.get("impact_score", 0.0))
-            if not data.get("relevance", False):
-                score = 0.0
-            return {
-                "score": max(-1.0, min(1.0, score)),
-                "sector": str(data.get("inferred_sector", "UNKNOWN")),
-                "reasoning": str(data.get("reasoning", "No reasoning provided.")),
-                "source": "gemini",
-            }
+            return _parse_llm_json(response.text or "", "gemini")
         except asyncio.TimeoutError:
-            log.warning("Gemini timed out after %.1fs; using fallback matrix", GEMINI_TIMEOUT)
+            log.warning("Gemini timed out after %.1fs; trying next tier", GEMINI_TIMEOUT)
         except (ValueError, TypeError, KeyError) as exc:
-            log.warning("Gemini response unparsable (%s); using fallback matrix", exc)
-        except Exception as exc:  # API/transport errors
-            log.warning("Gemini API error (%s); using fallback matrix", exc)
+            log.warning("Gemini response unparsable (%s); trying next tier", exc)
+        except Exception as exc:  # API/transport errors (quota 429, 503, ...)
+            log.warning("Gemini API error (%s); trying next tier", exc)
+        return None
+
+    async def _score_groq(
+        self, headline: str, symbol: str, price: float, sector: str
+    ) -> Optional[dict]:
+        """Tier 2: Groq, via its OpenAI-compatible endpoint. ``None`` on failure.
+
+        Exists because Gemini's free tier is 20 requests/day/model: one demo
+        exhausts it, and without a second LLM every later headline silently
+        dropped to the lexicon (which scores an unknown phrasing as 0.00 and
+        then does nothing at all).
+
+        ``response_format=json_object`` asks Groq to guarantee parseable JSON;
+        the shared parser still strips fences in case the model ignores it.
+        """
+        prompt = _build_prompt(headline, symbol, price, sector)
+        payload = {
+            "model": GROQ_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,            # low: we want a reproducible estimate
+            "response_format": {"type": "json_object"},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=GROQ_TIMEOUT) as client:
+                r = await client.post(
+                    GROQ_URL,
+                    headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                    json=payload,
+                )
+            if r.status_code != 200:
+                log.warning(
+                    "Groq HTTP %d (%s); using fallback matrix",
+                    r.status_code, r.text[:200],
+                )
+                return None
+            content = r.json()["choices"][0]["message"]["content"]
+            return _parse_llm_json(content, "groq")
+        except httpx.TimeoutException:
+            log.warning("Groq timed out after %.1fs; using fallback matrix", GROQ_TIMEOUT)
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            log.warning("Groq response unparsable (%s); using fallback matrix", exc)
+        except Exception as exc:  # transport errors
+            log.warning("Groq API error (%s); using fallback matrix", exc)
         return None
 
     # ------------------------------------------------------------- execution #

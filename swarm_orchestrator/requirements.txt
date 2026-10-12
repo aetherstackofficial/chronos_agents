@@ -16,7 +16,8 @@ gymnasium>=0.29
 fastapi>=0.111
 uvicorn[standard]>=0.30
 
-# LLM macro oracle
+# LLM macro oracle (tier 1 Gemini SDK; tier 2 Groq is a plain HTTP call on
+# httpx, which is listed below and is a RUNTIME dependency of oracle.py)
 google-genai>=1.0
 
 # Strategy runner / FIX gateway
@@ -29,6 +30,8 @@ reportlab>=4.0
 # Configuration
 python-dotenv>=1.0
 
+# HTTP client -- oracle.py's Groq tier at runtime, and the FastAPI test client
+httpx>=0.27
+
 # Testing
 pytest>=8.0
-httpx>=0.27
