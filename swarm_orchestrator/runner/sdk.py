@@ -64,7 +64,11 @@ if not log.handlers:  # dedicated handler so the [SDK] tag survives co-imports
 # --------------------------------------------------------------------------- #
 # Constants (venue + runtime policy)                                           #
 # --------------------------------------------------------------------------- #
-TICK_SIZE: float = 0.05  # PROTOCOL section 3 — all LIMIT prices snap to this grid
+# Fallback only. The live tick arrives in every tick payload as `tick_size`
+# (PROTOCOL section 5.1); the engine derives it from the instrument's price
+# band and re-checks it at each session open, so a hardcoded value here would
+# put user orders on the wrong grid.
+DEFAULT_TICK_SIZE: float = 0.05
 MAX_ORDERS_PER_TICK: int = 5  # SDK throttle (PROTOCOL section 10)
 ACK_TIMEOUT_S: float = 5.0  # per-order wait for the engine ack
 IDLE_TIMEOUT_S: float = 30.0  # exit cleanly if no tick arrives for this long
@@ -109,12 +113,17 @@ class Strategy:
 # --------------------------------------------------------------------------- #
 # Order validation                                                             #
 # --------------------------------------------------------------------------- #
-def _round_to_tick(price: float) -> float:
-    """Snap ``price`` to the venue tick grid (0.05)."""
-    return round(round(price / TICK_SIZE) * TICK_SIZE, 2)
+def _round_to_tick(price: float, tick: float = DEFAULT_TICK_SIZE) -> float:
+    """Snap ``price`` to the venue tick grid supplied by the engine."""
+    if tick <= 0:
+        tick = DEFAULT_TICK_SIZE
+    dp = 0
+    while dp < 6 and abs(tick * (10 ** dp) - round(tick * (10 ** dp))) > 1e-9:
+        dp += 1
+    return round(round(price / tick) * tick, dp)
 
 
-def validate_order(raw: Any) -> Optional[dict]:
+def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
     """Normalise and validate one user-returned order.
 
     Returns the cleaned order dict (still without ``msg``/``agent_id``) or
@@ -148,7 +157,7 @@ def validate_order(raw: Any) -> Optional[dict]:
         if not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0:
             log.warning("Dropping LIMIT order: price must be float > 0, got %r", price)
             return None
-        order["price"] = _round_to_tick(float(price))
+        order["price"] = _round_to_tick(float(price), tick)
 
     tif = raw.get("tif_ticks")
     if tif is not None:
@@ -191,6 +200,9 @@ class _StrategyRunner:
         self.data_port = data_port
         self._stop_requested = False
         self._order_counter = 0
+        # Tracks the engine's current venue tick (PROTOCOL section 5.1
+        # `tick_size`), refreshed from every tick payload.
+        self._tick_size: float = DEFAULT_TICK_SIZE
 
         self.ctx = zmq.Context.instance()
         self.sub = self.ctx.socket(zmq.SUB)
@@ -253,6 +265,9 @@ class _StrategyRunner:
     # -- per-tick processing ------------------------------------------------ #
     def _handle_tick(self, state: dict) -> None:
         """Run ``on_tick``, validate/throttle the returned orders, send them."""
+        # The engine re-derives its tick at each session open, so track it here
+        # rather than assuming a fixed grid.
+        self._tick_size = float(state.get("tick_size") or DEFAULT_TICK_SIZE)
         try:
             raw_orders = self.strategy.on_tick(state)
         except Exception:
@@ -265,7 +280,8 @@ class _StrategyRunner:
                         type(raw_orders).__name__)
             return
 
-        valid = [o for o in (validate_order(r) for r in raw_orders) if o is not None]
+        valid = [o for o in (validate_order(r, self._tick_size) for r in raw_orders)
+                 if o is not None]
         if len(valid) > MAX_ORDERS_PER_TICK:
             log.warning("Throttling: %d orders returned, sending first %d",
                         len(valid), MAX_ORDERS_PER_TICK)

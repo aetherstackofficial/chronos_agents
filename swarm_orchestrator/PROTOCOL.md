@@ -41,19 +41,44 @@ All modules MUST code against these schemas exactly. Any deviation must be recor
 | `ORACLE_PORT` | `5557` | Oracle ROUTER (news scoring requests from bridge) |
 | `BRIDGE_HOST` / `BRIDGE_PORT` | `0.0.0.0` / `8000` | FastAPI bridge |
 | `CHRONOS_DB` | `chronos.db` | SQLite file (engine writes, bridge reads — WAL mode) |
-| `GEMINI_API_KEY` | — | Oracle LLM key |
+| `GEMINI_API_KEY` | — | Oracle scoring tier 1 (Gemini; free tier is 20 req/day/model) |
+| `GROQ_API_KEY` | — | Oracle scoring tier 2, used when tier 1 fails or its quota is spent |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Override if Groq retires the default model |
 
 ## 3 · Venue model (ONE consistent venue — India/NSE style)
 
 | Parameter | Value |
 |---|---|
 | Currency | INR, display symbol `₹` |
-| Tick size | `0.05` — all limit prices rounded to tick by the engine |
+| Tick size | **Derived from the instrument's price band** (see below) — all limit prices rounded to tick by the engine. Published every tick as `tick_size` (§5.1); clients must not hardcode it. |
 | Session | 09:15 → 15:30 = **375 sim-minutes/day** |
 | Time model | **1 real second = 1 sim-minute** (one physics tick) |
 | Sim epoch | day 1 starts at unix `1767258900` (2026-01-01 09:15 IST-as-UTC) |
 | Overnight | after minute 375, clock jumps +17.5 h to next 09:15, `day_count += 1` |
 | Lot size | 1 share; `qty` is always an int > 0 |
+
+### 3.1 · Tick size bands
+
+A single fixed tick cannot serve every price: `0.05` is 0.026 % of ₹190 but 1.6 % of ₹3 — coarse
+enough that a low-priced instrument cannot move at all, which flattens every candle and saturates
+the agents' `volatility` / `volume_ratio` features.
+
+| Price | Tick |
+|---|---|
+| < ₹10 | `0.001` |
+| ₹10 – ₹100 | `0.01` |
+| ₹100 – ₹1 000 | `0.05` |
+| ₹1 000 – ₹10 000 | `0.10` |
+| ₹10 000 + | `0.50` |
+
+**Review cadence.** The tick is derived at `INIT_SIM` / `REPLAY_START` and re-checked **only at
+each session open**, mirroring a real exchange's periodic slab revision. It is never re-derived
+intraday: re-gridding mid-session would strand every resting order on a price that is no longer
+valid. When a session review does change the tick (price crossed a band edge), the engine starts
+the new session with a fresh book.
+
+> NSE's real floor is ₹0.01; the sub-₹10 band here is finer than the live market so low-priced
+> instruments stay usable in simulation.
 
 ## 4 · Order-entry plane — message schemas (JSON, UTF-8, one frame after identity)
 
@@ -123,6 +148,10 @@ strict **price–time priority**. Self-trades are prevented (an order never matc
   "unix_time": 1767258960, "day_count": 1, "market_minute": 2,
   "symbol": "TCS", "sector": "TECH",
   "last_price": 190.10,          // last TRADE price — the only price authority
+  "tick_size": 0.05,             // venue tick for the current price band (§3.1).
+                                 // Clients MUST snap LIMIT prices to this — it is
+                                 // re-derived at each session open, so a hardcoded
+                                 // client-side tick will drift out of sync.
   "best_bid": 190.05, "best_ask": 190.15, "mid_price": 190.10,
   "micro_price": 190.0862,       // size-weighted mid
   "spread": 0.10,

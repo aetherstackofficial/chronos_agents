@@ -17,7 +17,7 @@ from collections import deque
 from datetime import datetime
 from typing import Deque, Dict, List, Optional, Tuple
 
-from .book import OrderBook, TICK_SIZE, round_to_tick
+from .book import OrderBook, round_to_tick, tick_for_price, decimals_for_tick
 from .persistence import Persistence
 from .replay import HistoricalReplayer
 
@@ -81,8 +81,13 @@ class MatchingEngine:
         self.mode = mode
         self.paused = False
         self.rng = random.Random(seed)
-        self.book = OrderBook()
-        self.last_price = round_to_tick(price)
+        # Tick comes from the price band and is frozen for the session; it is
+        # re-checked only at each session open (_advance_clock).
+        self.tick = tick_for_price(price)
+        self.price_dp = decimals_for_tick(self.tick)
+        self.book = OrderBook(self.tick)
+        self.last_price = round_to_tick(price, self.tick)
+
         self.seq = 0
         self._order_counter = 0
         self.tick_count = 0
@@ -226,7 +231,7 @@ class MatchingEngine:
         else:
             self._min_sell_vol += qty
 
-        trade = {"seq": self._next_seq(), "price": round(price, 2),
+        trade = {"seq": self._next_seq(), "price": round(price, self.price_dp),
                  "qty": qty, "buyer": buyer, "seller": seller,
                  "aggressor": taker_side, "unix_time": self.sim_unix_time,
                  "market_minute": self.market_minute}
@@ -577,6 +582,7 @@ class MatchingEngine:
                                    "action": "day_close",
                                    "day_count": self.day_count}))
             self._expire_day_orders()
+            self._review_tick_size()
             self.day_count += 1
             self.market_minute = 1
             self.sim_unix_time += self.OVERNIGHT_SECONDS
@@ -589,21 +595,40 @@ class MatchingEngine:
         else:
             self.sim_unix_time += self.SECONDS_PER_MINUTE
 
+    def _review_tick_size(self) -> None:
+        """Session-boundary tick review (mirrors a real exchange's periodic
+        slab revision). Only fires when the price has crossed a band edge, so
+        the grid is stable across ordinary days. Never called intraday --
+        re-gridding mid-session would strand every resting order.
+        """
+        new_tick = tick_for_price(self.last_price)
+        if new_tick == self.tick:
+            return
+        logger.info("tick review: %s -> %s (price %s)",
+                    self.tick, new_tick, self.last_price)
+        self.tick = new_tick
+        self.price_dp = decimals_for_tick(new_tick)
+        # The old book sits on the old grid; start the new session clean.
+        self.book = OrderBook(new_tick)
+        self._resting.clear()
+        self.last_price = round_to_tick(self.last_price, new_tick)
+
+
     def _refresh_sim_lp(self, pubs: List[Publication],
                         reference: Optional[float] = None) -> None:
         """Designated liquidity (§8.4): cancel/replace 8 limit levels per
         side around the reference price via the normal order path."""
         self.flush_agent_orders(self.LP_AGENT)
         ref = round_to_tick(reference if reference is not None
-                            else self.last_price)
+                            else self.last_price, self.tick)
         base = self.LP_BASE_SIZE + self._volume_ma() * self.LP_VOLUME_FACTOR
         bid_offset = 0
         ask_offset = 0
         for _ in range(self.LP_LEVELS):
             bid_offset += self.rng.randint(1, self.LP_MAX_TICK_STEP)
             ask_offset += self.rng.randint(1, self.LP_MAX_TICK_STEP)
-            bid_px = round_to_tick(ref - bid_offset * TICK_SIZE)
-            ask_px = round_to_tick(ref + ask_offset * TICK_SIZE)
+            bid_px = round_to_tick(ref - bid_offset * self.tick, self.tick)
+            ask_px = round_to_tick(ref + ask_offset * self.tick, self.tick)
             bid_sz = max(1, int(base * self.rng.uniform(
                 1 - self.LP_SIZE_JITTER, 1 + self.LP_SIZE_JITTER)))
             ask_sz = max(1, int(base * self.rng.uniform(
@@ -739,7 +764,7 @@ class MatchingEngine:
                          / (bid_sz + ask_sz))
             else:
                 micro = mid
-            spread = round(best_ask - best_bid, 2)
+            spread = round(best_ask - best_bid, self.price_dp)
         else:
             # Empty side: mid/micro fall back to last_price for display.
             mid = self.last_price
@@ -755,14 +780,18 @@ class MatchingEngine:
             "market_minute": self.market_minute,
             "symbol": self.symbol,
             "sector": self.sector,
-            "last_price": round(self.last_price, 2),
+            "last_price": round(self.last_price, self.price_dp),
+            # Venue tick for the current price band. Clients (runner/sdk.py,
+            # dashboard) must snap LIMIT prices to this -- it is re-derived at
+            # each session open, so a hardcoded client-side tick would drift.
+            "tick_size": self.tick,
             "best_bid": best_bid,
             "best_ask": best_ask,
-            "mid_price": round(mid, 4),
-            "micro_price": round(micro, 4),
+            "mid_price": round(mid, max(4, self.price_dp)),
+            "micro_price": round(micro, max(4, self.price_dp)),
             "spread": spread,
             "bar": bar,
-            "vwap": round(self._vwap(), 4),
+            "vwap": round(self._vwap(), max(4, self.price_dp)),
             "rsi": self._rsi(),
             "ofi": round(self._ofi(), 4),
             "volatility": round(self._volatility(), 6),
