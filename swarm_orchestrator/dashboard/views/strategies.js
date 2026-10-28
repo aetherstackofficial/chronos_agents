@@ -23,6 +23,28 @@ class UserStrategy(Strategy):
         self.inventory = ack["pos"]
 `;
 
+const STYLE_ID = 'strat-check-style';
+const CSS = `
+/* .chip is display:inline-flex, which beat the hidden attribute: empty chips showed */
+.panel-head .chip[hidden]{display:none}
+.chk{border-bottom:1px solid var(--border);padding:var(--s-2) var(--s-3);max-height:34%;overflow:auto;font-size:var(--fs-sm);display:flex;flex-direction:column;gap:var(--s-2)}
+.chk[hidden]{display:none}
+.chk.stale{opacity:.55}
+.chk .chk-head{display:flex;align-items:center;gap:var(--s-2);font-weight:600}
+.chk .chk-head.ok{color:var(--good)}
+.chk .chk-head.bad{color:var(--bad)}
+.chk .chk-head.warn{color:var(--warn,#e5a50a)}
+.chk .chk-sub{color:var(--text-dim);font-weight:400}
+.chk ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--s-1)}
+.chk li{display:flex;flex-direction:column;gap:2px}
+.chk li .chk-msg{color:var(--text-hi)}
+.chk li .chk-code{color:var(--text-dim);font-family:var(--mono,monospace);white-space:pre-wrap}
+.chk li.warn .chk-msg{color:var(--text-mut)}
+.chk button.chk-line{all:unset;cursor:pointer;color:var(--accent-2);font-family:var(--mono,monospace);text-decoration:underline}
+.chk button.chk-line:focus-visible{outline:2px solid var(--accent)}
+.chk pre{margin:0;white-space:pre-wrap;color:var(--text-mut);font-family:var(--mono,monospace)}
+`;
+
 const COPILOT_KEY = 'chronos.copilot.code';
 const STRAT_POLL_MS = 3000;
 const LOGS_POLL_MS = 2000;
@@ -55,6 +77,11 @@ export default {
 
   async mount(el, ctx) {
     const { api, fmt, ui, splitter } = ctx;
+    if (!document.getElementById(STYLE_ID)) {
+      const st = document.createElement('style');
+      st.id = STYLE_ID; st.textContent = CSS;
+      document.head.appendChild(st);
+    }
 
     el.innerHTML = `
       <div class="view-root"><div class="view-cols" data-role="cols">
@@ -63,16 +90,19 @@ export default {
           <div class="panel-head"><span>Strategy Editor — Python</span>
             <span class="actions">
               <span class="chip" data-role="loaded-chip" hidden>editing <b data-role="loaded-name"></b></span>
+              <span class="chip" data-role="sandbox-chip" hidden></span>
               <span class="chip" data-role="backend-chip" hidden></span>
             </span>
           </div>
           <div class="editor-toolbar">
             <input class="input mono" data-role="name" value="mean_rev" aria-label="Strategy name" maxlength="48">
+            <button type="button" class="btn btn-sm" data-role="check" title="Check the code and dry-run it with sample ticks. Nothing trades.">Check</button>
             <button type="button" class="btn btn-sm" data-role="save">Save to Library</button>
             <button type="button" class="btn btn-primary btn-sm" data-role="saverun">Save &amp; Run</button>
             <button type="button" class="btn btn-sm" data-role="run" title="Run without saving">${ui.icon('play')} Run</button>
             <button type="button" class="btn btn-ghost btn-sm" data-role="new" title="Reset editor to the SDK template">${ui.icon('plus')} New</button>
           </div>
+          <div class="chk" data-role="check-out" role="status" aria-live="polite" hidden></div>
           <div class="monaco-host" data-role="editor" aria-label="Python strategy code editor"></div>
         </section>
 
@@ -95,6 +125,7 @@ export default {
     this._els = {
       name: q('name'), editor: q('editor'), lib: q('lib'), running: q('running'),
       backendChip: q('backend-chip'), loadedChip: q('loaded-chip'), loadedName: q('loaded-name'),
+      sandboxChip: q('sandbox-chip'), checkOut: q('check-out'),
     };
     this._scriptId = null;
 
@@ -153,10 +184,97 @@ export default {
       if (!backend) return;
       this._els.backendChip.hidden = false;
       this._els.backendChip.textContent = backend;
-      this._els.backendChip.title = backend === 'docker'
-        ? 'Docker sandbox: resource-limited container'
-        : 'Subprocess sandbox: psutil watchdog — honest note: not a security boundary';
+      const sealed = backend === 'docker' || backend === 'runner';
+      this._els.backendChip.title = sealed
+        ? 'Sealed container: no network except the engine, no project files, 512 MB / 1 CPU'
+        : 'Plain process: NOT sealed (development mode). It can read this machine\'s files.';
     };
+
+    /* ---- sandbox status chip: is there a sealed place to run strategies? ---- */
+    api.strategy.sandbox().then((s) => {
+      if (!this._els.sandboxChip) return;
+      const chip = this._els.sandboxChip;
+      chip.hidden = false;
+      if (s.sealed) { chip.textContent = 'sealed sandbox'; chip.className = 'chip up'; chip.title = 'Strategies run in sealed containers.'; }
+      else if (s.mode === 'unsafe-subprocess') { chip.textContent = 'UNSEALED (dev)'; chip.className = 'chip warn'; chip.title = 'CHRONOS_ALLOW_UNSAFE_SANDBOX is set: strategies run as plain processes.'; }
+      else { chip.textContent = 'no sandbox: Run disabled'; chip.className = 'chip down'; chip.title = 'No sealed sandbox is available. Start the stack with docker compose.'; }
+    }).catch(() => {});
+
+    /* ---- check results panel ---------------------------------------------------- */
+    const markersFor = (monaco, errors) => (errors || []).filter((e) => e.line).map((e) => ({
+      severity: monaco.MarkerSeverity.Error,
+      message: `${e.stage}: ${e.message}`,
+      startLineNumber: e.line, startColumn: 1, endLineNumber: e.line, endColumn: 1000,
+    }));
+    const clearMarkers = () => {
+      if (this._editor && window.monaco) window.monaco.editor.setModelMarkers(this._editor.getModel(), 'chronos-check', []);
+    };
+    const jumpTo = (line) => {
+      if (this._editor) { this._editor.revealLineInCenter(line); this._editor.setPosition({ lineNumber: line, column: 1 }); this._editor.focus(); }
+    };
+    const problemItem = (p, cls) => `
+      <li class="${cls}">
+        <span class="chk-msg">${p.line ? `<button type="button" class="chk-line" data-line="${p.line}">line ${p.line}</button> · ` : ''}<span class="dim">${esc(p.stage)}</span> · ${esc(p.message)}</span>
+        ${p.code ? `<span class="chk-code">${esc(p.code)}</span>` : ''}
+      </li>`;
+    const renderCheck = (r) => {
+      const out = this._els.checkOut;
+      if (!out) return;
+      const errors = r.errors || [];
+      const warnings = r.warnings || [];
+      const how = [r.dry_run, r.duration_ms != null ? `${r.duration_ms} ms` : null].filter(Boolean).join(' · ');
+      let head;
+      if (errors.length) head = `<div class="chk-head bad">✖ ${errors.length} problem${errors.length > 1 ? 's' : ''} found <span class="chk-sub">${esc(how)}</span></div>`;
+      else if ((r.dry_run || '').startsWith('skipped')) head = `<div class="chk-head warn">⚠ The code looks valid, but the dry run was skipped <span class="chk-sub">${esc(r.dry_run)}</span></div>`;
+      else head = `<div class="chk-head ok">✔ Passed <span class="chk-sub">${r.ticks_tested || 0} sample ticks, ${(r.orders || []).length} order(s) returned · ${esc(how)}</span></div>`;
+      out.innerHTML = head
+        + (errors.length ? `<ul>${errors.map((e) => problemItem(e, 'err')).join('')}</ul>` : '')
+        + (warnings.length ? `<ul>${warnings.map((w) => problemItem(w, 'warn')).join('')}</ul>` : '')
+        + (r.output ? `<div class="chk-sub">Your print() output:</div><pre>${esc(r.output)}</pre>` : '');
+      out.hidden = false;
+      out.classList.remove('stale');
+      if (window.monaco && this._editor) window.monaco.editor.setModelMarkers(this._editor.getModel(), 'chronos-check', markersFor(window.monaco, errors));
+    };
+    const showText = (title, text, kind) => {
+      const out = this._els.checkOut;
+      if (!out) return;
+      out.innerHTML = `<div class="chk-head ${kind}">${esc(title)}</div><pre>${esc(text)}</pre>`;
+      out.hidden = false;
+      out.classList.remove('stale');
+    };
+    this._els.checkOut.addEventListener('click', (e) => {
+      const b = e.target.closest('button.chk-line');
+      if (b) jumpTo(Number(b.dataset.line));
+    });
+    // Editing makes the last result out of date: fade it and drop the red marks.
+    const onEdited = () => { clearMarkers(); if (this._els.checkOut) this._els.checkOut.classList.add('stale'); };
+    if (this._editor) this._editor.onDidChangeModelContent(onEdited);
+    if (this._fallback) this._fallback.addEventListener('input', onEdited);
+
+    /* Run failed: when the server says the code failed its check, fetch the
+       structured result so the user sees each problem with its line. */
+    const handleRunError = async (err, usedEditorCode) => {
+      const msg = err.detail || err.message || String(err);
+      if (err.status === 400 && /strategy check failed/i.test(msg)) {
+        ui.toast('The strategy did not pass the check', 'bad');
+        if (usedEditorCode) {
+          try { renderCheck(await api.strategy.check(getCode())); return; } catch { /* fall back to text */ }
+        }
+        showText('The strategy did not pass the check', msg.replace(/^strategy check failed:\s*/i, '').split('; ').join('\n'), 'bad');
+      } else if (err.status === 503) {
+        ui.toast('No sealed sandbox is available', 'bad');
+        showText('Cannot run: no sealed sandbox', msg, 'bad');
+      } else {
+        ui.toast(`Run failed: ${msg}`, 'bad');
+      }
+    };
+
+    q('check').addEventListener('click', async (e) => {
+      const code = getCode();
+      if (!code.trim()) { ui.toast('The strategy is empty', 'warn'); return; }
+      try { renderCheck(await ui.busy(e.currentTarget, () => api.strategy.check(code))); }
+      catch (err) { showText('Check failed', err.detail || err.message, 'bad'); }
+    });
 
     /* ---- save / run actions ---- */
     const saveToLibrary = async (btn) => {
@@ -187,7 +305,7 @@ export default {
         showBackend(res.backend);
         ui.toast(`Running as ${res.agent_id} — results are being recorded`, 'good');
         renderRunning();
-      } catch (err) { ui.toast(`Run failed: ${err.detail || err.message}`, 'bad'); }
+      } catch (err) { handleRunError(err, true); }
     });
 
     q('run').addEventListener('click', async (e) => {
@@ -198,7 +316,7 @@ export default {
         showBackend(res.backend);
         ui.toast(`Running as ${res.agent_id}`, 'good');
         renderRunning();
-      } catch (err) { ui.toast(`Run failed: ${err.detail || err.message}`, 'bad'); }
+      } catch (err) { handleRunError(err, true); }
     });
 
     q('new').addEventListener('click', () => {
@@ -283,7 +401,8 @@ export default {
           renderLibrary();
         }
       } catch (err) {
-        ui.toast(`${act} failed: ${err.detail || err.message}`, 'bad');
+        if (act === 'runscript') handleRunError(err, false);
+        else ui.toast(`${act} failed: ${err.detail || err.message}`, 'bad');
       }
     });
 

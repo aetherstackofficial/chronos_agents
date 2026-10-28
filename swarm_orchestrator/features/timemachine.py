@@ -27,6 +27,12 @@ SESSION_MINUTES = 375                 # one full venue session (PROTOCOL §3)
 SESSION_OPEN = (9, 15)                # 09:15 first bar
 TICK_SIZE = 0.05
 DEFAULT_DATA_DIR = "data/scenarios"
+# Where tapes are written when no data_dir is passed. The ENGINE must be able
+# to read them: under Docker the bridge (which writes them) and the engine are
+# separate containers, so compose points this at the shared chronos_data volume
+# (/data/scenarios). Without it the tapes landed in the bridge container only,
+# and every Time Machine replay was REJECTED by the engine ("No such file").
+SCENARIO_DIR_ENV = "CHRONOS_SCENARIO_DIR"
 
 # Package parent = swarm_orchestrator; relative data dirs resolve against it so
 # the tapes land in the same place regardless of the caller's cwd.
@@ -148,8 +154,15 @@ _SCENARIO_PHASES: Dict[str, List[_Phase]] = {
 _BASE_VOLUME = 6000  # shares per calm minute before phase multipliers
 
 
-def _resolve_dir(data_dir: str) -> str:
-    """Absolute scenario directory; relative paths anchor at swarm_orchestrator."""
+def _resolve_dir(data_dir: Optional[str] = None) -> str:
+    """Absolute scenario directory; relative paths anchor at swarm_orchestrator.
+
+    ``None`` means: CHRONOS_SCENARIO_DIR if set, else DEFAULT_DATA_DIR. The env
+    var is read here, per call, not at import -- bridge.py runs load_dotenv()
+    after importing this module, so an import-time read would ignore .env.
+    """
+    if data_dir is None:
+        data_dir = os.getenv(SCENARIO_DIR_ENV) or DEFAULT_DATA_DIR
     if os.path.isabs(data_dir):
         return data_dir
     return os.path.abspath(os.path.join(_BASE_DIR, data_dir))
@@ -222,7 +235,7 @@ def _generate_tape(scenario_id: str) -> List[dict]:
     return bars[:SESSION_MINUTES]
 
 
-def ensure_scenarios(data_dir: str = DEFAULT_DATA_DIR) -> None:
+def ensure_scenarios(data_dir: Optional[str] = None) -> None:
     """Generate any missing scenario CSV tapes under ``data_dir``.
 
     Idempotent and deterministic: an existing file is never rewritten, and a
@@ -250,7 +263,7 @@ def get_scenario(scenario_id: str) -> Optional[dict]:
     return _SCENARIO_INDEX.get(scenario_id)
 
 
-def scenario_csv_path(scenario_id: str, data_dir: str = DEFAULT_DATA_DIR) -> str:
+def scenario_csv_path(scenario_id: str, data_dir: Optional[str] = None) -> str:
     """Absolute CSV path for a scenario tape (input to REPLAY_START).
 
     :raises KeyError: if ``scenario_id`` is unknown.

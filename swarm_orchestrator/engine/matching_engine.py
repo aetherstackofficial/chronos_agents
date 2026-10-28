@@ -38,7 +38,6 @@ class MatchingEngine:
     # -- policy constants (§8, all named per quality bar) ---------------- #
     DEFAULT_TIF_TICKS = 60                    # §8.8 default resting TTL
     TRADES_KEPT = 50                          # FETCH_STATE compat window
-    LEADERBOARD_SIZE = 15
     DEPTH_LEVELS = 10
     RSI_PERIOD = 14
     VOLUME_MA_WINDOW = 20
@@ -147,6 +146,10 @@ class MatchingEngine:
         self._reset_state(sym, sector, bars[0]["o"], seed, "REPLAY")
         self.run_id = self._make_run_id()
         self.replayer = HistoricalReplayer(self, bars)
+        # Start the clock at the file's first bar (real date/time), so even
+        # the paused snapshot before tick 1 shows it, not 1 Jan 2026.
+        if bars[0].get("ts") is not None:
+            self.sim_unix_time = bars[0]["ts"]
         if self.db is not None:
             self.db.start_run(
                 self.run_id, datetime.now().isoformat(), sym, sector,
@@ -804,6 +807,9 @@ class MatchingEngine:
         }
 
     def _leaderboard(self) -> List[dict]:
+        """Every non-internal agent, best P&L first. Not truncated: it used to
+        be capped at the top 15, which hid the rest of the swarm (and any
+        strategy ranked below 15th) from the dashboard and the results store."""
         rows = []
         for led in self.agent_ledger.values():
             if led["internal"]:
@@ -813,7 +819,7 @@ class MatchingEngine:
                          "pnl": round(equity - led["start_cash"], 2),
                          "pos": led["pos"], "cash": round(led["cash"], 2)})
         rows.sort(key=lambda r: r["pnl"], reverse=True)
-        return rows[:self.LEADERBOARD_SIZE]
+        return rows
 
     def _persist(self, payload: dict) -> None:
         pending, self._pending_trades = self._pending_trades, []

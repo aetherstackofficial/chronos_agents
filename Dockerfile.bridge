@@ -2,6 +2,10 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY swarm_orchestrator/requirements.txt .
 RUN pip install -r requirements.txt
+# Bridge-only extras (yfinance) in their own layer, so adding one later does
+# not invalidate the heavy layer above and re-download torch.
+COPY swarm_orchestrator/requirements-bridge.txt .
+RUN pip install -r requirements-bridge.txt
 COPY swarm_orchestrator/ .
 EXPOSE 8000
 CMD ["uvicorn", "bridge:app", "--host", "0.0.0.0", "--port", "8000"]

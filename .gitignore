@@ -18,6 +18,8 @@ swarm_orchestrator/.env
 swarm_orchestrator/.strategies/
 swarm_orchestrator/scripts_library/
 swarm_orchestrator/data/scenarios/
+# User replay CSVs saved by POST /api/replay/upload (local, non-Docker runs)
+swarm_orchestrator/data/uploads/
 *.db
 *.db-wal
 *.db-shm

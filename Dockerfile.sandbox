@@ -1,0 +1,20 @@
+# Image every user strategy runs in (and every dry run). Deliberately tiny:
+# Python, pyzmq and the SDK. No project code, no .env, no API keys, no database,
+# so a strategy that reads every file it can see finds nothing worth stealing.
+# Built by docker-compose (service "sandbox-image") as chronos-sandbox:latest.
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/sandbox
+RUN pip install --no-cache-dir pyzmq
+WORKDIR /sandbox
+# Only the files the SDK, the dry run and the entry point need.
+COPY swarm_orchestrator/runner/__init__.py \
+     swarm_orchestrator/runner/sdk.py \
+     swarm_orchestrator/runner/check.py \
+     swarm_orchestrator/runner/dryrun.py \
+     swarm_orchestrator/runner/sandbox_entry.py \
+     /sandbox/runner/
+# docker_backend.py starts containers with --user 65534; this is the same user.
+USER 65534:65534
+CMD ["python", "-m", "runner.sandbox_entry"]

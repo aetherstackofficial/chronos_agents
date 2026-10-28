@@ -19,6 +19,9 @@ const CSS = `
 .tm-banner{border-left:3px solid var(--reactive);display:flex;flex-direction:column;gap:var(--s-1)}
 .tm-banner strong{color:var(--text-hi)}
 .tm-banner p{margin:0;color:var(--text-mut)}
+/* display:flex above would otherwise beat the hidden attribute, so the
+   "REPLAY armed" banner showed before any replay had started */
+.tm-banner[hidden]{display:none}
 .tm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:var(--s-4)}
 .tm-card{display:flex;flex-direction:column;gap:var(--s-3);transition:border-color var(--dur-2) var(--ease),transform var(--dur-2) var(--ease)}
 .tm-card:hover{transform:translateY(-2px);border-color:var(--border-accent)}

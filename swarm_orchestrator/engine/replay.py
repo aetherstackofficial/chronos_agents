@@ -14,9 +14,11 @@ Determinism: uses ONLY the engine's seeded rng.
 """
 from __future__ import annotations
 
+import calendar
 import csv
+import datetime as dt
 import logging
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from .book import round_to_tick
 
@@ -26,6 +28,38 @@ if TYPE_CHECKING:  # avoid a runtime circular import
 logger = logging.getLogger("engine.replay")
 
 _REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
+
+# Non-ISO date layouts accepted besides ISO ("2026-10-19 09:15[:SS]").
+_TS_FORMATS = ("%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M",
+               "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+               "%Y/%m/%d %H:%M:%S", "%Y/%m/%d %H:%M")
+
+
+def _parse_ts(text: str) -> Optional[int]:
+    """Bar timestamp text -> epoch seconds, or None if it can't be read.
+
+    The clock time is read as written and encoded as if it were UTC. That is
+    the engine's convention (SIM_EPOCH is "09:15 IST-as-UTC") and what the
+    dashboard's UTC formatters expect, so an NSE bar at 09:15 shows 09:15. Any
+    UTC offset in the text ("+05:30") is dropped, not converted, for the same
+    reason.
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    try:
+        t = dt.datetime.fromisoformat(text)
+    except ValueError:
+        t = None
+        for fmt in _TS_FORMATS:
+            try:
+                t = dt.datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+        if t is None:
+            return None
+    return calendar.timegm(t.replace(tzinfo=None).timetuple())
 
 
 class HistoricalReplayer:
@@ -60,6 +94,12 @@ class HistoricalReplayer:
         Accepts columns date,time,open,high,low,close,volume
         (case-insensitive) or a single datetime/timestamp column instead of
         date+time. Raises ValueError with a clear message on bad input.
+
+        Each bar also carries ``"ts"``: its date/time as epoch seconds (see
+        _parse_ts), so the replay shows the file's real dates on the chart
+        instead of the engine's own clock. If ANY row's date/time can't be
+        read, ``ts`` is None for every bar and the engine falls back to its
+        own clock (the file still loads; an unreadable date is not an error).
         """
         with open(csv_path, newline="", encoding="utf-8-sig") as fh:
             reader = csv.DictReader(fh)
@@ -78,6 +118,7 @@ class HistoricalReplayer:
                     f"{csv_path}: need date+time columns or a single "
                     "datetime/timestamp column")
             bars: List[dict] = []
+            all_dated = True
             for line_no, row in enumerate(reader, start=2):
                 try:
                     o = float(row[col_map["open"]])
@@ -97,9 +138,24 @@ class HistoricalReplayer:
                     raise ValueError(
                         f"{csv_path}: line {line_no}: inconsistent OHLC "
                         f"(o={o} h={h} l={l} c={c})")
-                bars.append({"o": o, "h": h, "l": l, "c": c, "v": v})
+                if "datetime" in col_map:
+                    stamp = row.get(col_map["datetime"])
+                elif "timestamp" in col_map:
+                    stamp = row.get(col_map["timestamp"])
+                else:
+                    stamp = (f"{row.get(col_map['date'], '')} "
+                             f"{row.get(col_map['time'], '')}")
+                ts = _parse_ts(stamp)
+                all_dated = all_dated and ts is not None
+                bars.append({"o": o, "h": h, "l": l, "c": c, "v": v, "ts": ts})
         if not bars:
             raise ValueError(f"{csv_path}: CSV contains no bars")
+        if not all_dated:
+            logger.warning("%s: some date/time values are unreadable; replay "
+                           "will use the engine clock instead of file dates",
+                           csv_path)
+            for b in bars:
+                b["ts"] = None
         return bars
 
     # ------------------------------------------------------------------ #
@@ -123,6 +179,12 @@ class HistoricalReplayer:
 
         bar = self.bars[self.cursor]
         self.cursor += 1
+        # Show the file's own date/time: trades and the tick published this
+        # second both read engine.sim_unix_time, and the dashboard keys its
+        # candles on it. (Without this the chart ran on the engine's own clock
+        # from 1 Jan 2026, whatever dates the CSV held.)
+        if bar.get("ts") is not None:
+            engine.sim_unix_time = bar["ts"]
         total_qty = max(self.MIN_BAR_QTY, min(bar["v"], self.MAX_BAR_QTY))
         child_qty = max(1, total_qty // self.CHILD_TARGETS)
 

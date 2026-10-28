@@ -84,3 +84,67 @@ def test_no_price_gap_across_latch(replay_csv):
                       "type": "MARKET", "qty": 50})
     # The latch itself must not teleport the price beyond a real fill move.
     assert abs(e.last_price - price_before) < price_before * 0.05
+
+
+# --- replay shows the CSV's own dates (not the engine's 1 Jan 2026 clock) ----
+def _epoch(y, mo, d, h, mi):
+    import calendar
+    return calendar.timegm((y, mo, d, h, mi, 0))
+
+
+def _write_csv(path, header, rows):
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        w.writerows(rows)
+    return str(path)
+
+
+def _tick(pubs):
+    return next(p for topic, p in pubs if topic == "tick")
+
+
+def test_replay_uses_csv_dates(tmp_path):
+    path = _write_csv(tmp_path / "d.csv",
+                      ["date", "time", "open", "high", "low", "close", "volume"],
+                      [["2026-10-19", "09:15", 100, 100.5, 99.8, 100.2, 800],
+                       ["2026-10-19", "09:16:00", 100.2, 100.3, 100, 100.1, 400],
+                       ["2026-10-20", "09:15", 100.1, 100.4, 100, 100.3, 400]])
+    e = MatchingEngine()
+    e.start_replay(path, "TCS", "TECH", seed=1)
+    assert e.sim_unix_time == _epoch(2026, 10, 19, 9, 15)       # before tick 1
+    t1, t2, t3 = (_tick(e.physics_tick()) for _ in range(3))
+    assert t1["unix_time"] == _epoch(2026, 10, 19, 9, 15)
+    assert t2["unix_time"] == _epoch(2026, 10, 19, 9, 16)
+    assert t3["unix_time"] == _epoch(2026, 10, 20, 9, 15)       # next trading day
+
+
+def test_replay_datetime_column_with_offset_keeps_wall_clock(tmp_path):
+    path = _write_csv(tmp_path / "dt.csv",
+                      ["Datetime", "Open", "High", "Low", "Close", "Volume"],
+                      [["2026-10-19 09:15:00+05:30", 100, 101, 99, 100.5, 10]])
+    e = MatchingEngine()
+    e.start_replay(path, "TCS", "TECH", seed=1)
+    assert _tick(e.physics_tick())["unix_time"] == _epoch(2026, 10, 19, 9, 15)
+
+
+def test_replay_with_unreadable_dates_still_loads_on_engine_clock(tmp_path):
+    path = _write_csv(tmp_path / "bad.csv",
+                      ["date", "time", "open", "high", "low", "close", "volume"],
+                      [["yesterday", "morning", 100, 101, 99, 100.5, 10]])
+    e = MatchingEngine()
+    _, n = e.start_replay(path, "TCS", "TECH", seed=1)
+    assert n == 1
+    assert _tick(e.physics_tick())["unix_time"] == MatchingEngine.SIM_EPOCH + 60
+
+
+def test_clock_continues_from_file_time_after_latch(replay_csv):
+    e = MatchingEngine()
+    e.start_replay(replay_csv, "TCS", "TECH", seed=7)
+    for _ in range(3):
+        e.physics_tick()
+    last = e.sim_unix_time
+    e.handle_message({"msg": "ORDER", "agent_id": "STRAT_me", "action": "BUY",
+                      "type": "MARKET", "qty": 5})
+    assert e.mode == "REACTIVE"
+    assert _tick(e.physics_tick())["unix_time"] == last + 60    # no jump back to 2026-01-01

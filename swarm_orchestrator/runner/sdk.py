@@ -123,47 +123,43 @@ def _round_to_tick(price: float, tick: float = DEFAULT_TICK_SIZE) -> float:
     return round(round(price / tick) * tick, dp)
 
 
-def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
-    """Normalise and validate one user-returned order.
+def check_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> tuple[Optional[dict], Optional[str]]:
+    """Validate one user-returned order and say WHY if it is invalid.
 
-    Returns the cleaned order dict (still without ``msg``/``agent_id``) or
-    ``None`` if the order is invalid.  Invalid orders are logged and dropped —
-    a bad order must never crash the strategy loop.
+    Returns ``(clean_order, None)`` when valid (the order is still without
+    ``msg``/``agent_id``) or ``(None, reason)`` when not. This is the single
+    source of truth for the order rules: the live loop uses it through
+    :func:`validate_order`, and the pre-run dry run (runner/dryrun.py) uses it
+    directly to show the user the reason instead of a silent drop.
     """
     if not isinstance(raw, dict):
-        log.warning("Dropping order: expected dict, got %r", type(raw).__name__)
-        return None
+        return None, f"expected a dict, got {type(raw).__name__}"
 
     action = raw.get("action")
     if action not in VALID_ACTIONS:
-        log.warning("Dropping order: invalid action %r (need BUY/SELL)", action)
-        return None
+        return None, f"invalid action {action!r} (need BUY/SELL)"
 
     # Shorthand {"action","qty"} means a MARKET order.
     order_type = raw.get("type", "MARKET")
     if order_type not in VALID_TYPES:
-        log.warning("Dropping order: invalid type %r (need MARKET/LIMIT)", order_type)
-        return None
+        return None, f"invalid type {order_type!r} (need MARKET/LIMIT)"
 
     qty = raw.get("qty")
     if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
-        log.warning("Dropping order: qty must be int > 0, got %r", qty)
-        return None
+        return None, f"qty must be an int > 0, got {qty!r}"
 
     order: dict = {"action": action, "type": order_type, "qty": qty}
 
     if order_type == "LIMIT":
         price = raw.get("price")
         if not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0:
-            log.warning("Dropping LIMIT order: price must be float > 0, got %r", price)
-            return None
+            return None, f"a LIMIT order needs a price > 0, got {price!r}"
         order["price"] = _round_to_tick(float(price), tick)
 
     tif = raw.get("tif_ticks")
     if tif is not None:
         if isinstance(tif, bool) or not isinstance(tif, int) or tif < 0:
-            log.warning("Dropping order: tif_ticks must be int >= 0, got %r", tif)
-            return None
+            return None, f"tif_ticks must be an int >= 0, got {tif!r}"
         order["tif_ticks"] = tif
 
     client_order_id = raw.get("client_order_id")
@@ -174,6 +170,20 @@ def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
     if isinstance(meta, dict):
         order["meta"] = meta
 
+    return order, None
+
+
+def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
+    """Normalise and validate one user-returned order.
+
+    Returns the cleaned order dict (still without ``msg``/``agent_id``) or
+    ``None`` if the order is invalid.  Invalid orders are logged and dropped —
+    a bad order must never crash the strategy loop. See :func:`check_order`
+    for the rules and the reason text.
+    """
+    order, reason = check_order(raw, tick)
+    if order is None:
+        log.warning("Dropping order: %s", reason)
     return order
 
 

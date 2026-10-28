@@ -47,6 +47,34 @@ async function req(path, { method = 'GET', body } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+/**
+ * Multipart upload of one file in a form field named `file`. Separate from
+ * req() because req() always JSON-encodes; here the browser must set the
+ * multipart Content-Type (with its boundary) itself. Same ApiError handling.
+ * @param {string} path
+ * @param {File} file
+ * @returns {Promise<any>} parsed JSON
+ */
+async function upload(path, file) {
+  const form = new FormData();
+  form.append('file', file);
+  let res;
+  try {
+    res = await fetch(path, { method: 'POST', body: form });
+  } catch (err) {
+    throw new ApiError(0, `network error: ${err.message}`, path);
+  }
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = await res.json();
+      if (data && data.detail) detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+    } catch { /* non-JSON error body — keep statusText */ }
+    throw new ApiError(res.status, detail, path);
+  }
+  return res.json();
+}
+
 const get = (path) => req(path);
 const post = (path, body = {}) => req(path, { method: 'POST', body });
 const put = (path, body = {}) => req(path, { method: 'PUT', body });
@@ -70,6 +98,15 @@ export const api = {
   /** POST /api/replay/start {csv_path, symbol?, sector?, seed?} → {status, run_id, bars} */
   replay: (cfg) => post('/api/replay/start', cfg),
 
+  /** POST /api/replay/upload (multipart, field "file") → {file_id, filename, csv_path, bars, size_bytes}.
+   *  400 = bad CSV (detail names the line/column), 413 = over the size limit. */
+  replayUpload: (file) => upload('/api/replay/upload', file),
+
+  /** POST /api/replay/yahoo {symbol, interval: "1m"|"15m", days} → same shape as replayUpload
+   *  plus {symbol, interval, first_bar, last_bar, repaired_bars}. Saved as a CSV server-side;
+   *  replay it with replay({csv_path}). 404 = no data (often a missing .NS suffix). */
+  replayYahoo: (cfg) => post('/api/replay/yahoo', cfg),
+
   /** GET /api/health → {status, engine} */
   health: () => get('/api/health'),
 
@@ -83,6 +120,11 @@ export const api = {
     list: () => get('/api/strategy/list'),
     /** GET /api/strategy/{id}/logs → {logs} */
     logs: (id) => get(`/api/strategy/${enc(id)}/logs`),
+    /** POST /api/strategy/check {code} → {ok, errors:[{stage,line,message,code?}], warnings, orders,
+     *  ticks_tested, output, backend, dry_run, duration_ms}. Checks and dry-runs; never trades. */
+    check: (code) => post('/api/strategy/check', { code }),
+    /** GET /api/strategy/sandbox → {mode: runner|docker|unsafe-subprocess|unavailable, sealed} */
+    sandbox: () => get('/api/strategy/sandbox'),
   },
 
   /* ---- PROTOCOL_V2 §1 — script library ---- */

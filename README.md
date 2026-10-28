@@ -76,7 +76,7 @@ Gymnasium · FastAPI + Uvicorn · SQLite · Google GenAI (Gemini) · simplefix �
 python -m venv venv
 venv\Scripts\activate            # Windows   (source venv/bin/activate on Unix)
 cd swarm_orchestrator
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-bridge.txt   # bridge extras: yfinance
 cp .env.example .env             # then edit .env — add your GEMINI_API_KEY
 ```
 
@@ -120,6 +120,30 @@ python scripts/smoke_e2e.py              # end-to-end: boots the engine, drives 
 The suite guards the Phase-2 promises: order-book price-time priority, **ledger conservation**,
 **price is book-driven only**, **deterministic runs under a fixed seed**, the **replay→reactive
 latch**, and the oracle's real fallback matrix.
+
+## Running user strategies safely
+
+Strategies are code written by other people, so they never run inside the bridge. Each one runs in its
+own sealed container:
+
+| Protection | How |
+|---|---|
+| Nothing to steal | The `chronos-sandbox` image holds only Python, pyzmq and the SDK: no project files, no `.env`, no keys |
+| No escape routes | all Linux capabilities dropped, read-only filesystem (`/tmp` is small and non-executable), non-root user, `no-new-privileges` |
+| Resource limits | 512 MB memory (swap included), 1 CPU, 64 processes |
+| Network | an `internal` Docker network (`chronos_strategies`) with the engine on it and nothing else: no internet, and `bridge`, `oracle` and `runner` cannot even be resolved |
+| No Docker access for the web server | only the **runner** service (`swarm_orchestrator/runner/service.py`) holds the Docker socket. It has no published port, requires `X-Runner-Token`, and builds the `docker run` command itself, so it cannot be asked for a privileged container or a host mount |
+
+Before anything runs, **Check** (Strategies page, or `POST /api/strategy/check`) reads the code and dry-runs
+it in a throwaway container with no network at all, and reports every problem with its line number. **Run**
+repeats the check. Writing a strategy: [`docs/STRATEGY_GUIDE.md`](docs/STRATEGY_GUIDE.md).
+
+- With no sealed sandbox (for example running the bridge on a host with no Docker) strategies are **refused**,
+  not silently run unsealed. For local development only, set `CHRONOS_ALLOW_UNSAFE_SANDBOX=1`.
+- Set a unique `RUNNER_TOKEN` in `.env` for anything other than a local laptop.
+- Restarting the `runner` stops all running strategies (it removes leftover strategy containers on start).
+  To clean up by hand: `docker rm -f $(docker ps -aq --filter label=chronos.role=strategy)`.
+- Only the Python standard library is available inside the sandbox (no numpy or pandas).
 
 ## What changed from Phase 1
 

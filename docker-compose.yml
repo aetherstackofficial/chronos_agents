@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   engine:
     build:
@@ -19,6 +17,9 @@ services:
       - CHRONOS_DB=/data/chronos.db
     volumes:
       - chronos_data:/data
+    networks:
+      - default
+      - strategies      # lets sealed strategy containers reach the engine (and nothing else)
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.connect(('127.0.0.1', 5555)); s.close()"]
       interval: 5s
@@ -39,8 +40,8 @@ services:
       # Scoring tiers 1 and 2. Read from the host env (or the root .env) at
       # `up` time only -- .dockerignore keeps every .env out of the image, so
       # no key is ever baked into a layer.
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
       - GROQ_MODEL=${GROQ_MODEL:-}
     depends_on:
       engine:
@@ -75,14 +76,66 @@ services:
       - BRIDGE_HOST=0.0.0.0
       - BRIDGE_PORT=8000
       - CHRONOS_DB=/data/chronos.db
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      # Replay CSV uploads (POST /api/replay/upload) go on the shared volume:
+      # the bridge writes /data/uploads/<file>.csv and the engine, which mounts
+      # the same volume at /data, reads it at that exact path on REPLAY_START.
+      - CHRONOS_UPLOAD_DIR=/data/uploads
+      - CHRONOS_UPLOAD_MAX_MB=10
+      # Time Machine crisis tapes: same reason. They used to be written inside
+      # the bridge container, where the engine could not read them, so every
+      # Time Machine replay was REJECTED under Docker.
+      - CHRONOS_SCENARIO_DIR=/data/scenarios
+      # Strategies run in sealed containers started by the runner service. The
+      # bridge has no Docker socket; without a sealed backend it refuses to run
+      # strategies (CHRONOS_ALLOW_UNSAFE_SANDBOX is deliberately not set).
+      - RUNNER_URL=http://runner:8100
+      - RUNNER_TOKEN=${RUNNER_TOKEN:-chronos-local-runner-token}
     volumes:
-      # Same volume the engine writes to, so /api/runs and equity curves can read it.
+      # Same volume the engine writes to, so /api/runs and equity curves can read it,
+      # and so uploaded replay CSVs are visible to the engine.
       - chronos_data:/data
     depends_on:
       engine:
         condition: service_healthy
       oracle:
         condition: service_started
+      runner:
+        condition: service_started
+
+  # Builds the image every strategy container runs in, then exits. Only the SDK
+  # and pyzmq are in it: no project files, no .env, no keys.
+  sandbox-image:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox
+    image: chronos-sandbox:latest
+    container_name: chronos_sandbox_image
+    command: ["python", "-c", "print('chronos-sandbox image is built')"]
+    restart: "no"
+
+  # The only service with the Docker socket. It starts sealed strategy containers
+  # for the bridge and accepts nothing else (see swarm_orchestrator/runner/service.py).
+  # No published port, and strategy containers are on a different network, so
+  # neither the internet nor a strategy can reach it.
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.runner
+    container_name: chronos_runner
+    environment:
+      - RUNNER_TOKEN=${RUNNER_TOKEN:-chronos-local-runner-token}
+      - SANDBOX_IMAGE=chronos-sandbox:latest
+      - SANDBOX_NETWORK=chronos_strategies
+      - SANDBOX_ZMQ_HOST=engine
+      - ZMQ_ORDER_PORT=5555
+      - ZMQ_DATA_PORT=5556
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      sandbox-image:
+        condition: service_completed_successfully
 
   frontend:
     build:
@@ -96,3 +149,10 @@ services:
 
 volumes:
   chronos_data:
+
+networks:
+  # Strategy containers join this network. "internal" means no route to the
+  # internet or the host; the engine is the only other member.
+  strategies:
+    name: chronos_strategies
+    internal: true

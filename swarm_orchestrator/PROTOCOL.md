@@ -201,7 +201,9 @@ strict **price–time priority**. Self-trades are prevented (an order never matc
 | `POST /api/sim/resume` | `{}` → `{status}` |
 | `POST /api/news` | `{headline}` → `{status:"accepted"}` (score arrives via `event`) |
 | `POST /api/replay/start` | `{csv_path, symbol?, sector?, seed?}` → `{status, run_id, bars}` |
-| `POST /api/strategy/run` | `{name, code}` → `{strategy_id, agent_id}` (python only) |
+| `POST /api/strategy/check` | `{code}` → `{ok, errors:[{stage,line,message,code?}], warnings, orders, ticks_tested, output, backend, dry_run, duration_ms}`. Static check + dry run in the sealed sandbox; never trades. Always 200 |
+| `GET /api/strategy/sandbox` | → `{mode: runner\|docker\|unsafe-subprocess\|unavailable, sealed}` |
+| `POST /api/strategy/run` | `{name, code}` → `{strategy_id, agent_id, backend}` (python only). Runs the same check first: `400` lists each problem with its line, `503` if no sealed sandbox is available |
 | `POST /api/strategy/stop` | `{strategy_id}` → `{status}` |
 | `GET /api/strategy/list` | → `[{strategy_id, agent_id, name, status, started_at}]` |
 | `GET /api/strategy/{id}/logs` | → `{logs: "..."}` (tail of sandboxed stdout/stderr) |
@@ -319,11 +321,24 @@ class MatchingEngine:
 ```python
 class SandboxManager:
     def __init__(self, base_dir: str = ".strategies"): ...
+    def check(self, code: str) -> dict:   # static check + dry run; never launches
     def launch(self, name: str, code: str) -> dict:   # {"strategy_id","agent_id","backend"}
+                                          # ValueError: failed check; SandboxUnavailable: no sealed backend
+    def mode(self) -> str:                # runner | docker | unsafe-subprocess | unavailable
     def stop(self, strategy_id: str) -> bool: ...
     def list(self) -> list[dict]:  # [{"strategy_id","agent_id","name","status","started_at"}]
     def logs(self, strategy_id: str, tail: int = 200) -> str: ...
 ```
 Strategy processes run user code that defines `class UserStrategy(Strategy)` (see §10);
 artifacts live under `swarm_orchestrator/.strategies/<strategy_id>/` (gitignored).
+
+**Sealed execution.** Strategy code never runs in the bridge's own process space. It runs in a
+container from the `chronos-sandbox` image (SDK + pyzmq only, no project files or keys), with all
+capabilities dropped, a read-only root, 512 MB / 1 CPU / 64 processes, and a network that reaches the
+engine only. Under Compose the bridge asks the **runner service** (`runner/service.py`, the only
+container holding the Docker socket, port 8100 on the internal network, `X-Runner-Token`) to start it.
+With no sealed backend, `launch()` refuses; the old plain-subprocess mode runs only if
+`CHRONOS_ALLOW_UNSAFE_SANDBOX=1` (local development). Every launch first runs `runner.check.static_check`
+and a dry run (`runner/dryrun.py`: `on_start`, `on_tick` on calm/dip/spike sample ticks, `on_fill`,
+`on_stop`), and reports problems with line numbers. User guide: `docs/STRATEGY_GUIDE.md`.
 FIX gateway listens on `FIX_PORT` (default `9878`).
