@@ -17,9 +17,6 @@ from typing import Any, Dict, IO, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from features.copilot import generate_strategy
-from features.montecarlo import run_fan
-from features.narrator import narrate
 from features.timemachine import (
     SCENARIOS,
     ensure_scenarios,
@@ -46,28 +43,6 @@ _redteam_count: int = 0
 # --------------------------------------------------------------------------- #
 # Request bodies                                                               #
 # --------------------------------------------------------------------------- #
-class MonteCarloBody(BaseModel):
-    """POST /api/montecarlo body (PROTOCOL_V2 §3).
-
-    Range handling lives in :func:`features.montecarlo.run_fan`: out-of-range
-    ``n_paths``/``horizon`` are CLAMPED, semantically bad input (empty symbol,
-    non-positive price, malformed shock) raises ``ValueError`` → HTTP 400.
-    """
-
-    symbol: str = Field(max_length=64)
-    price: float
-    n_paths: int = 60
-    horizon: int = 90
-    seed_base: int = 1000
-    shock: Optional[Dict[str, Any]] = None
-
-
-class CopilotBody(BaseModel):
-    """POST /api/copilot body (PROTOCOL_V2 §4)."""
-
-    description: str = ""
-
-
 class TimeMachineStartBody(BaseModel):
     """POST /api/timemachine/start body (PROTOCOL_V2 §5)."""
 
@@ -79,38 +54,6 @@ class RedTeamBody(BaseModel):
     """POST /api/lab/redteam body (PROTOCOL_V2 §8)."""
 
     count: Optional[int] = Field(default=None, ge=1, le=_REDTEAM_MAX_COUNT)
-
-
-# --------------------------------------------------------------------------- #
-# §3 Monte-Carlo fan                                                           #
-# --------------------------------------------------------------------------- #
-@router.post("/api/montecarlo")
-async def api_montecarlo(body: MonteCarloBody) -> dict:
-    """Run the real in-process Monte-Carlo fan (off the event loop)."""
-    try:
-        return await asyncio.to_thread(
-            run_fan,
-            body.symbol.strip(),
-            body.price,
-            n_paths=body.n_paths,
-            horizon=body.horizon,
-            seed_base=body.seed_base,
-            shock=body.shock,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-# --------------------------------------------------------------------------- #
-# §4 Strategy copilot                                                          #
-# --------------------------------------------------------------------------- #
-@router.post("/api/copilot")
-async def api_copilot(body: CopilotBody) -> dict:
-    """NL description → runnable UserStrategy code (Gemini or template)."""
-    description = body.description.strip()
-    if not description:
-        raise HTTPException(status_code=400, detail="description must not be empty")
-    return await generate_strategy(description, os.getenv("GEMINI_API_KEY"))
 
 
 # --------------------------------------------------------------------------- #
@@ -158,17 +101,6 @@ async def api_timemachine_start(body: TimeMachineStartBody, request: Request) ->
         "bars": ack.get("bars", scenario["bars"]),
         "scenario": scenario,
     }
-
-
-# --------------------------------------------------------------------------- #
-# §6 Narration                                                                 #
-# --------------------------------------------------------------------------- #
-@router.post("/api/narrate")
-async def api_narrate(request: Request) -> dict:
-    """Explain the current market state from the bridge's live view."""
-    tick = request.app.state.latest_tick()
-    trades = request.app.state.recent_trades(60)
-    return await narrate(tick, trades, os.getenv("GEMINI_API_KEY"))
 
 
 # --------------------------------------------------------------------------- #

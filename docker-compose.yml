@@ -1,8 +1,6 @@
 services:
   engine:
-    build:
-      context: .
-      dockerfile: Dockerfile.engine
+    build: { context: ., dockerfile: Dockerfile.engine }
     container_name: chronos_engine
     ports:
       - "5555:5555"
@@ -27,9 +25,7 @@ services:
       retries: 5
 
   oracle:
-    build:
-      context: .
-      dockerfile: Dockerfile.oracle
+    build: { context: ., dockerfile: Dockerfile.oracle }
     container_name: chronos_oracle
     ports:
       - "5557:5557"
@@ -48,22 +44,12 @@ services:
         condition: service_healthy
 
   swarm:
-    build:
-      context: .
-      dockerfile: Dockerfile.agents
+    build: { context: ., dockerfile: Dockerfile.agents }
     container_name: chronos_swarm
-    environment:
-      - ZMQ_HOST=engine
-      - ZMQ_ORDER_PORT=5555
-      - ZMQ_DATA_PORT=5556
-    depends_on:
-      engine:
-        condition: service_healthy
-
+    environment: [ ZMQ_HOST=engine, ZMQ_ORDER_PORT=5555, ZMQ_DATA_PORT=5556 ]
+    depends_on: { engine: { condition: service_healthy } }
   bridge:
-    build:
-      context: .
-      dockerfile: Dockerfile.bridge
+    build: { context: ., dockerfile: Dockerfile.bridge }
     container_name: chronos_bridge
     ports:
       - "8000:8000"
@@ -136,16 +122,6 @@ services:
     depends_on:
       sandbox-image:
         condition: service_completed_successfully
-
-  frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.frontend
-    container_name: chronos_frontend
-    ports:
-      - "3000:80"
-    depends_on:
-      - bridge
 
 volumes:
   chronos_data:

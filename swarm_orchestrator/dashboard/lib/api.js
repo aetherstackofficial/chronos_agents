@@ -159,14 +159,6 @@ export const api = {
     pdfUrl: (id) => `/api/results/${enc(id)}/report.pdf`,
   },
 
-  /* ---- PROTOCOL_V2 §3 — Monte-Carlo counterfactual fan ---- */
-  /** POST /api/montecarlo {symbol, price, n_paths?, horizon?, seed_base?, shock?} → fan dict */
-  montecarlo: (cfg) => post('/api/montecarlo', cfg),
-
-  /* ---- PROTOCOL_V2 §4 — copilot ---- */
-  /** POST /api/copilot {description} → {code, explanation, source} */
-  copilot: (description) => post('/api/copilot', { description }),
-
   /* ---- PROTOCOL_V2 §5 — time machine ---- */
   timemachine: {
     /** GET /api/timemachine/scenarios → [{id, name, description, symbol, sector, bars, tag}] */
@@ -174,10 +166,6 @@ export const api = {
     /** POST /api/timemachine/start {scenario_id, seed?} → {status, run_id, bars, scenario} */
     start: (id, seed) => post('/api/timemachine/start', seed != null ? { scenario_id: id, seed } : { scenario_id: id }),
   },
-
-  /* ---- PROTOCOL_V2 §6 — narration ---- */
-  /** POST /api/narrate {} → {narration, source} */
-  narrate: () => post('/api/narrate', {}),
 
   /* ---- PROTOCOL §6 — persistence explorer ---- */
   /** GET /api/runs → [{run_id, started_at, symbol, mode, seed}] */

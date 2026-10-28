@@ -45,7 +45,6 @@ const CSS = `
 .chk pre{margin:0;white-space:pre-wrap;color:var(--text-mut);font-family:var(--mono,monospace)}
 `;
 
-const COPILOT_KEY = 'chronos.copilot.code';
 const STRAT_POLL_MS = 3000;
 const LOGS_POLL_MS = 2000;
 
@@ -138,12 +137,6 @@ export default {
 
     /* ---- editor (Monaco, textarea fallback) ---- */
     let initial = SDK_TEMPLATE;
-    const handoff = sessionStorage.getItem(COPILOT_KEY);
-    if (handoff) {
-      initial = handoff;
-      sessionStorage.removeItem(COPILOT_KEY);
-      ui.toast('Copilot code loaded into the editor', 'good');
-    }
 
     this._els.editor.innerHTML = '<div class="skeleton skel-block" aria-hidden="true"></div>';
     const monaco = await loadMonaco();
