@@ -65,17 +65,6 @@ def test_results_reports_render():
     assert pdf[:4] == b"%PDF"
 
 
-# --- Monte-Carlo ---------------------------------------------------------------
-def test_montecarlo_fan_shape_and_determinism():
-    from features.montecarlo import run_fan
-    a = run_fan("TCS", 190.0, n_paths=8, horizon=20, seed_base=5)
-    assert a["n_paths"] == 8 and a["horizon"] == 20
-    for k in ("p5", "p25", "p50", "p75", "p95"):
-        assert len(a["percentiles"][k]) == 20
-    assert set(a["terminal"]) >= {"p5", "p50", "p95", "mean", "min", "max"}
-    b = run_fan("TCS", 190.0, n_paths=8, horizon=20, seed_base=5)
-    assert a["percentiles"]["p50"] == b["percentiles"]["p50"]  # deterministic
-
 
 # --- Time Machine --------------------------------------------------------------
 def test_scenarios_generate_valid_csvs(tmp_path):
@@ -103,18 +92,4 @@ def _accepts_dir():
         return False
 
 
-# --- Copilot & Narrator fallbacks (offline, no key) ----------------------------
-def test_copilot_template_fallback_returns_valid_code():
-    from features.copilot import generate_strategy
-    out = asyncio.run(generate_strategy("buy when rsi below 30 qty 40", None))
-    assert out["source"] == "template"
-    assert "class UserStrategy" in out["code"] and "def on_tick" in out["code"]
-    compile(out["code"], "<copilot>", "exec")  # must be valid python
 
-
-def test_narrator_heuristic_fallback():
-    from features.narrator import narrate
-    out = asyncio.run(narrate(
-        {"symbol": "TCS", "regime": "BULL", "ofi": 0.3, "spread": 0.1,
-         "last_price": 190.0, "vwap": 189.5, "leaderboard": []}, [], None))
-    assert out["source"] == "heuristic" and len(out["narration"]) > 0

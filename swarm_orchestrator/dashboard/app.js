@@ -14,10 +14,7 @@ import { splitter } from './lib/splitter.js';
 import market from './views/market.js';
 import strategies from './views/strategies.js';
 import results from './views/results.js';
-// import montecarlo from './views/montecarlo.js';
 import timemachine from './views/timemachine.js';
-// import copilot from './views/copilot.js';
-// import narration from './views/narration.js';
 import runs from './views/runs.js';
 import lab from './views/lab.js';
 
@@ -334,29 +331,11 @@ function buildRhs() {
   rhsState.feedBody = feed.querySelector('.rhs-section-body');
   rhsState.feedBody.innerHTML = '<span class="dim">waiting for events…</span>';
 
-  // /* -- market pulse -- */
-  // const pulse = rhsSection('Market Pulse', `<button type="button" class="btn btn-ghost btn-icon btn-sm" id="pulse-refresh" aria-label="Refresh narration">${ui.icon('refresh')}</button>`);
-  // scroll.appendChild(pulse);
-  // rhsState.pulseBody = pulse.querySelector('.rhs-section-body');
-  // rhsState.pulseBody.innerHTML = '<div class="pulse-line dim">press ↻ to ask the market why</div>';
-  // pulse.querySelector('#pulse-refresh').addEventListener('click', refreshPulse);
-
   el.rhsReopen.addEventListener('click', () => setRhsCollapsed(false));
 
   pollStrategies();
   rhsState.stratTimer = setInterval(pollStrategies, 3000);
   store.onEvent(onFeedEvent);
-}
-
-async function refreshPulse(e) {
-  const btn = e.currentTarget;
-  try {
-    const res = await ui.busy(btn, () => api.narrate());
-    rhsState.pulseBody.innerHTML = `<div class="pulse-line">${escapeHtml(res.narration || '—')}</div>`
-      + `<span class="chip pulse-src">${res.source || 'engine'}</span>`;
-  } catch (err) {
-    ui.toast(`Narration failed: ${err.detail || err.message}`, 'bad');
-  }
 }
 
 async function pollStrategies() {

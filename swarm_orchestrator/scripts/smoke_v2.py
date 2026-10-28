@@ -53,15 +53,8 @@ def main():
         check("get script code", req("GET", f"/api/scripts/{sid}")["code"] == code)
 
         print("New features:")
-        cop = req("POST", "/api/copilot", {"description": "buy when rsi below 30 qty 40"})
-        check("copilot returns valid code", "class UserStrategy" in cop.get("code", ""), cop.get("source"))
-        nar = req("POST", "/api/narrate", {})
-        check("narrate returns text", len(nar.get("narration", "")) > 0, nar.get("source"))
         scen = req("GET", "/api/timemachine/scenarios")
         check("timemachine 5 scenarios", len(scen) == 5)
-        mc = req("POST", "/api/montecarlo", {"symbol": "TCS", "price": 190.0, "n_paths": 12, "horizon": 25})
-        check("montecarlo fan", len(mc.get("percentiles", {}).get("p50", [])) == 25,
-              f"terminal p50={mc.get('terminal', {}).get('p50')}")
 
         print("Strategy -> Results -> CSV/PDF:")
         run = req("POST", f"/api/scripts/{sid}/run", {})
