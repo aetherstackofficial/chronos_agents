@@ -1,0 +1,44 @@
+# Phase 4 execution rules -- FROZEN 2026-10-29, before any Phase 4 run.
+# Changing a value here after the Phase 4 runs start invalidates the
+# Phase 4 vs Phase 1 comparison; record any change with a date and a reason.
+
+whale_pov:
+  # 15% of EXPECTED NSE volume per minute: the plan's own number, chosen to
+  # match the whale training environment (SmartMoneyEnv caps at 15% of bar
+  # volume, agents/environments.py:103-110). No NSE source for this value.
+  participation_cap: 0.15
+  cap_label: "plan's own number; matches SmartMoneyEnv training cap; no NSE source"
+  # Expected volume = adv_shares / 375 * minute_weights[m] from the real NSE
+  # curve (agents/config/volume_curves.json), NOT the simulated volume: the
+  # simulated market is ~14x too thin (Phase 1 report). The mismatch is
+  # reported, not patched.
+  volume_curves_file: volume_curves.json
+  unknown_symbol_fallback: RELIANCE        # logged when used
+  # Children: marketable LIMIT (buy at best ask, sell at best bid), live for
+  # one minute via the engine's tif_ticks, then expire; the unfilled part
+  # rolls into the next child, still under the cap. No market-order fallback.
+  child_order_type: LIMIT
+  child_tif_ticks: 1
+  # Cap on the parent's unfilled remainder (unchanged MAX_CLIP; whale size
+  # mismatch is a separate later fix).
+  max_parent_remaining: 10000
+  # Session bars are 1..375 (09:15..15:29). An order sent after the tick for
+  # bar m trades in bar m+1. Children may trade up to bar 374 (15:28); at the
+  # tick for bar 374 an unfinished parent is cancelled (CANCEL_ALL) and its
+  # shortfall recorded, so nothing of it trades in the 15:29 minute.
+  last_child_bar: 374
+  session_minutes: 375
+  # The 09:15 bar's open-auction volume is excluded from the curve (minute 0
+  # takes minute 1's expected volume): the engine has no auction and POV
+  # algorithms do not count auction prints. Decided 2026-10-29.
+  reason: WHALE_REBALANCE
+
+mm_inventory_skew:
+  # Shift BOTH quotes against inventory: shift_ticks = -round(k * q / q_max),
+  # clamped to [-max_ticks, +max_ticks], prices snapped to the engine tick.
+  # Long inventory (q > 0) lowers both quotes; short raises them.
+  # UNCALIBRATED: there is no NSE data on market-maker inventory. Fixed by
+  # rule, never tuned to pass tests.
+  k_ticks: 3
+  max_ticks: 3
+  label: "uncalibrated; fixed rule, not tuned"

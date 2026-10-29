@@ -7,44 +7,69 @@
 
 ---
 
-## 1. Work Division & Fair Workload Balance
+## 1. Executive Summary & Work Division
 
-The workload between Krishna and Akash is strictly **50% / 50%**, organized into equal, focused phases.
-
-- **Krishna**: Owns the **Matching Engine, Retail Crowd Microstructure & Realism Validation** (the deterministic physics of the market).
-- **Akash**: Owns the **Data Engineering, Analytical Baseline, RL Model Training & LLM News Engine** (the intelligence and learning pipelines).
+The implementation is split into two complementary tracks:
+- **Krishna (Algorithmic / Microstructure / Execution / Validation)**: ~50% total effort (higher code volume, deterministic algorithms, mathematical formulations, test harnesses, and architecture).
+- **Akash (ML / RL Training / Data Pipelines / LLM)**: ~50% total effort (higher research uncertainty, data sourcing, compute-heavy SAC/PPO training iterations, reward shaping, and LLM structured parsing).
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                          KRISHNA (Engine, Microstructure & Tests)                   │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  Phase 1: Realism Test Suite (The 8 statistical validation checks & report card)    │
-│  Phase 2: Retail Microstructure (Heterogeneous personalities & smooth sigmoid curves)│
-│  Phase 3: Retail Memory & Support/Resistance (Revenge trading, disposition effect)  │
-│  Phase 4: POV Execution Engine (Parent/child large order splitting & 15% cap)       │
-│  Phase 5: Engine Hand-Over Command (Replay -> Reactive mode latch for Banti)        │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-                                           │
-         (Krishna pushes to GitHub: Engine microphysics & test harness ready)
-                                           ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                             AKASH (Data, RL Models & LLM)                           │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│  Phase 1: Intraday Data Pipeline (Bypass 1M Excel row limit, Nifty 500 dataset)     │
-│  Phase 2: 9-Feature Observation Pipeline (Parity between Gym Env & live inference)  │
-│  Phase 3: Avellaneda–Stoikov Baseline (Closed-form inventory risk formula)          │
-│  Phase 4: RL Model Training (SAC vs. PPO policy training & "Beat the Formula")     │
-│  Phase 5: Jev LLM News Engine & Jump Test Integration (Typed structured decisions)  │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-                                           │
-                      SHARED: FastAPI Modular Bridge Restructure (with Aryan)
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                             KRISHNA'S WORKFLOW (Algorithmic)                     │
+│  Phase 1: Realism Test Suite (8 statistical verification tests & report card)    │
+│  Phase 2: Retail Swarm Microstructure (Personalities, smooth sigmoid, noise flow)│
+│  Phase 3: Behavioral Memory & Support/Resistance Order Clustering                │
+│  Phase 4: Market Maker Quote Skewing & Avellaneda-Stoikov Formula Baseline       │
+│  Phase 5: POV Large-Order Splitting Engine (Parent/Child & 15% participation)    │
+│  Phase 6: Engine Hand-Over Command (Replay -> Reactive latch for Banti)          │
+│  Phase 7: Statistical Jump Detection (Lee-Mykland test)                          │
+│  Phase 8: Modular FastAPI Refactor of bridge.py (Agreed layout with Aryan)       │
+└──────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+        (Git Commit & Push: Engine & Testing Harness Fully Deterministic)
+                                         ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                              AKASH'S WORKFLOW (ML & Data)                        │
+│  Phase 1: Clean Historical Data Ingestion (Bypass Excel 1M row cut, Nifty 500)   │
+│  Phase 2: 9-Feature Parity Engineering (Live build_observation <-> Gym Env)     │
+│  Phase 3: RL Model Training (SAC vs. PPO for Whales and Market Makers)           │
+│  Phase 4: Benchmark RL Models against Krishna's Avellaneda-Stoikov Baseline      │
+│  Phase 5: Jev LLM Structured News Engine (Typed decisions: sentiment & urgency)  │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Krishna's Detailed Workflow (5 Core Phases)
+## 2. Akash's Scope (ML, Training & LLM News)
 
-Krishna implements, tests, and pushes these 5 deterministic engine/microstructure phases:
+Akash will pick up the repository after Krishna's commit and execute the following:
+
+1. **Training Data Pipeline Overhaul**:
+   - Re-export multi-year Indian intraday stock data without Excel's 1,048,576 row truncation.
+   - Expand asset universe to representative Nifty 500 stocks (20, 50, or 100 tickers) across 20 years.
+   - Clean missing trading days and precompute rolling 14-period RSI and volume moving averages.
+2. **Feature Engineering & Parity**:
+   - Align the gym training environment (`UniversalMarketEnv` in `swarm_orchestrator/agents/environments.py`) with live inference (`features.py`).
+   - Add the 3 missing observation inputs (expanding observation vector to 9 dimensions):
+     1. Normalized inventory position.
+     2. Current bid-ask spread (in bps).
+     3. Order book imbalance (Level-1 / Top-5 bid-ask volume ratio).
+   - Recompute observation normalizer statistics (`VecNormalize`) with updated distribution ranges.
+3. **Reinforcement Learning Training (SAC vs. PPO)**:
+   - Implement Soft Actor-Critic (SAC) for `MarketMakerEnv` and `SmartMoneyEnv`.
+   - Train comparison models using PPO.
+   - Shape reward functions to penalize excess inventory and optimize spread capture / execution slippage.
+   - **Quality Gate ("Beat the Formula")**: Evaluate trained RL market makers against Krishna's closed-form Avellaneda–Stoikov model. If the RL model does not beat the formula, the formula will be preferred.
+4. **Jev LLM News Integration**:
+   - Replace slow (10–13s) free-text LLM prompt parsing in `oracle.py` with typed, structured JSON decision schemas.
+   - Extract: `sentiment` (float $-1.0 .. +1.0$), `category` (`earnings`, `macro`, `liquidity`, `regulatory`, `rumour`), and `urgency` ($1 .. 5$).
+   - Implement deterministic response caching and rate-limiting.
+
+---
+
+## 3. Krishna's Detailed Workflow & Implementation Blueprint
+
+Krishna executes and pushes the following 8 phases before handing off to Akash:
 
 ### Phase 1: Realism Test Suite (The Ground Truth)
 *File: `swarm_orchestrator/tests/test_realism.py`*
@@ -75,17 +100,17 @@ Build the 8 empirical market validation tests before touching agent mechanics. E
    - **Pass Criteria**: $\Delta P \approx Y \cdot \sigma \cdot \sqrt{Q / V}$ with regression fit $R^2 \ge 0.85$.
 8. **Monotonic Impact**:
    - Sanity check: $Q_2 > Q_1 \implies |\Delta P(Q_2)| \ge |\Delta P(Q_1)|$ with 0 exceptions.
-- **Deliverable**: Produces a standardized JSON report card (`pass`/`fail` per metric) for Aryan's landing page.
+- **Output**: Produces a standardized JSON report card (`pass`/`fail` per metric) for Aryan's landing page.
 
 ---
 
-### Phase 2: Retail Swarm Microstructure & Personalities
+### Phase 2: Real Order Flow & Retail Heterogeneity
 *Files: `swarm_orchestrator/agents/heuristic_retail.py`, `swarm_orchestrator/agents/live_agents.py`*
 
-Replace the frozen, identical 80 retail agents with an active, heterogeneous crowd that crosses the spread for real reasons.
+Replace the frozen, identical 80 retail agents with a heterogeneous crowd that crosses the spread for natural reasons.
 
 1. **Heterogeneous Agent Personalities**:
-   - Initialize each retail agent with unique behavioral traits:
+   - Initialize each of the 80 retail agents with randomized parameters:
      - `personality_type`: `MOMENTUM_TREND_FOLLOWER` (40%), `MEAN_REVERTER` (40%), `NOISE_TRADER` (20%).
      - `rsi_center`: Gaussian $\mathcal{N}(50, 5)$.
      - `conviction_threshold`: Uniform $\mathcal{U}(0.10, 0.35)$.
@@ -113,17 +138,35 @@ Replace the frozen, identical 80 retail agents with an active, heterogeneous cro
 1. **Natural Price Level Clustering**:
    - Remove hardcoded ₹5 price bounce rules from the engine.
    - Retail and resting limit orders cluster around psychological round numbers (multiples of ₹1, ₹5, ₹10, ₹100 depending on tick band) and local $N$-tick rolling swing highs and lows.
-   - Support and resistance emerge naturally from order density in the book.
+   - Support and resistance emerge endogenously from order density in the book.
 2. **Retail Psychological Memory**:
    - Track per-agent trading history (`pnl_streak`, `last_trade_pnl`, `open_trade_entry_price`).
-   - **Revenge Trading**: Following a realized loss ($PnL < 0$), apply temporary risk multiplier ($1.5\times - 2.0\times$) to next order.
-   - **Disposition Effect**: When holding winning positions ($P_{\text{current}} > P_{\text{entry}}$), urgency to take profit increases rapidly; when holding losers, holding time increases.
-   - **Capitulation**: Following $N \ge 3$ consecutive losses or extreme drawdown, execute full market panic liquidation.
+   - **Revenge Trading**: Following a realized loss ($PnL < 0$), temporary multiplier applied to risk appetite ($1.5\times - 2.0\times$) for the next order.
+   - **Disposition Effect**: When holding an open winning position ($P_{\text{current}} > P_{\text{entry}}$), urgency to take profit increases rapidly; when holding a losing position ($P_{\text{current}} < P_{\text{entry}}$), holding time increases.
+   - **Capitulation**: Following $N \ge 3$ consecutive losses or drawdown exceeding threshold, agent executes full market panic liquidation.
 
 ---
 
-### Phase 4: Large-Order Splitting (POV Execution Engine) & Quote Skew
-*Files: `swarm_orchestrator/engine/execution.py`, `swarm_orchestrator/engine/matching_engine.py`, `swarm_orchestrator/agents/live_agents.py`*
+### Phase 4: Market Maker Quote Skew & Avellaneda–Stoikov Baseline
+*Files: `swarm_orchestrator/agents/live_agents.py`, `swarm_orchestrator/agents/avellaneda_stoikov.py`*
+
+1. **Inventory-Based Quote Skewing**:
+   - Update `LiveMarketMaker` so quote prices skew based on current inventory $q$ relative to limit $Q_{\text{max}}$:
+     $$\Delta_{\text{skew}} = \frac{q}{Q_{\text{max}}} \times \kappa_{\text{skew}}$$
+     $$P_{\text{bid}} = P_{\text{mid}} \cdot (1 - \text{bid\_bps} - \Delta_{\text{skew}})$$
+     $$P_{\text{ask}} = P_{\text{mid}} \cdot (1 + \text{ask\_bps} - \Delta_{\text{skew}})$$
+   - When holding excess long inventory ($q > 0$), both bid and ask shift down to deter sellers and attract buyers, offloading inventory naturally.
+2. **Avellaneda–Stoikov Baseline Model**:
+   - Implement closed-form market maker logic to serve as Akash’s training benchmark:
+     $$r(s, q, t) = s - q \gamma \sigma^2 (T - t)$$
+     $$\delta^a + \delta^b = \gamma \sigma^2 (T - t) + \frac{2}{\gamma} \ln\left(1 + \frac{\gamma}{\kappa}\right)$$
+     $$r^a = r + \frac{\delta^a + \delta^b}{2}, \quad r^b = r - \frac{\delta^a + \delta^b}{2}$$
+     *(Where $s$ is mid price, $q$ is inventory, $\gamma$ is risk aversion, $\sigma$ is volatility, and $\kappa$ is book liquidity parameter).*
+
+---
+
+### Phase 5: Large-Order Splitting & POV Execution Engine
+*Files: `swarm_orchestrator/engine/execution.py`, `swarm_orchestrator/engine/matching_engine.py`*
 
 1. **Parent–Child Order Architecture**:
    - In `matching_engine.py`, support structured order payloads:
@@ -132,77 +175,57 @@ Replace the frozen, identical 80 retail agents with an active, heterogeneous cro
      - `total_target_qty`: Cumulative size.
      - `cum_filled_qty`: Running executed count.
      - `avg_fill_price`: Running VWAP of executed slices.
-     - `reason`: Strategy / institutional intent (`WHALE_REBALANCE`, `POV_TWAP`).
+     - `reason`: Strategy / institutional intent (`WHALE_REBALANCE`, `POV_TWAP`, `NEWS_SHOCK`).
 2. **Percentage of Volume (POV) Slicer**:
-   - Whale orders execute as child slices capped at $10\%$ to $15\%$ of traded bar volume, preventing huge single-order market dislocations.
-3. **Market Maker Quote Skewing**:
-   - Market maker quotes shift downward when holding long inventory to attract buyers, and shift upward when short to attract sellers.
+   - Institutional whale orders are placed into an execution schedule capped at a target participation rate (e.g. $10\%$ to $15\%$ of traded bar volume).
+   - Child slices adapt dynamically: if market volume dries up, slice sizes shrink to avoid excessive market impact.
 
 ---
 
-### Phase 5: Engine Control Hand-Over (Banti Hand-Off)
+### Phase 6: Engine Control Hand-Over & Replay Hooks (Banti Hand-Off)
 *Files: `swarm_orchestrator/engine/matching_engine.py`, `swarm_orchestrator/engine/replay.py`*
 
 1. **Deterministic Hand-Over Command**:
    - Implement explicit engine command `handover_to_reactive(at_bar: int)` callable via REST API and engine physics tick.
    - Switches engine mode from `REPLAY` to `REACTIVE` at a preset bar without requiring a trade from `STRAT_` or `USER_`.
-   - Preserves identical random seed and starting order book state, enabling Banti's control simulation (Section 2.8).
+   - Preserves identical random seed and starting order book state, enabling Banti's control simulation (2.8).
 
 ---
 
-## 3. Akash's Detailed Workflow (5 Core Phases)
+### Phase 7: Lee–Mykland Jump Detection Algorithm
+*File: `swarm_orchestrator/features/jumps.py`*
 
-Akash pulls Krishna's verified engine code from GitHub and executes the 5 ML/RL phases:
-
-### Phase 1: Intraday Data Pipeline & Re-Export
-- Re-export intraday data without Excel's 1,048,576 row cutoff across 20-50 Nifty 500 stocks.
-- Handle missing trading days, calculate rolling 14-period RSI, volume moving averages, and order flow imbalance.
-
-### Phase 2: 9-Feature Parity & Gym Environment Setup
-*Files: `swarm_orchestrator/agents/features.py`, `swarm_orchestrator/agents/environments.py`*
-- Expand observation vector from 6 to 9 dimensions across both training and live inference:
-  1. Distance to VWAP
-  2. Realized Volatility
-  3. Volume Ratio
-  4. RSI (normalized $0..1$)
-  5. Order Flow Imbalance (OFI)
-  6. Portfolio Return
-  7. **Inventory** (normalized)
-  8. **Current Spread** (bps)
-  9. **Book Imbalance** (Level-1 / Top-N bid-ask ratio)
-- Recompute observation normalizer statistics (`VecNormalize`).
-
-### Phase 3: Avellaneda–Stoikov Analytical Baseline
-*File: `swarm_orchestrator/agents/avellaneda_stoikov.py`*
-- Implement the published closed-form Avellaneda–Stoikov market maker formula:
-  $$r(s, q, t) = s - q \gamma \sigma^2 (T - t)$$
-  $$\delta^a + \delta^b = \gamma \sigma^2 (T - t) + \frac{2}{\gamma} \ln\left(1 + \frac{\gamma}{\kappa}\right)$$
-- Acts as the mathematical benchmark that any trained RL agent must beat before deployment.
-
-### Phase 4: RL Model Training (SAC vs. PPO) & "Beat the Formula"
-*Files: `swarm_orchestrator/agents/ml_models/`*
-- Implement Soft Actor-Critic (SAC) for `MarketMakerEnv` and `SmartMoneyEnv`.
-- Train comparative PPO models with inventory penalties and spread-capture rewards.
-- Benchmark trained models against the Phase 3 Avellaneda–Stoikov baseline.
-
-### Phase 5: Jev LLM Structured News Engine & Jump Detection
-*Files: `swarm_orchestrator/oracle.py`, `swarm_orchestrator/features/jumps.py`*
-- Replace slow (10-13s) free-text LLM prompt parsing with typed JSON schemas (sentiment, category, urgency).
-- Implement the Lee–Mykland statistical jump test to detect price shocks in historical bars, using Jev only to label the shock type.
+1. **Intraday Jump Test**:
+   - Detects abnormal price movements by comparing instantaneous return shocks against local realized bipower variation:
+     $$\mathcal{L}_t = \frac{|r_t|}{\sigma_{\text{bipower}}}$$
+   - When test statistic $\mathcal{L}_t$ exceeds the threshold $S_n$, tag the bar as an endogenous jump shock.
+   - Direction originates strictly from price data; Jev LLM is only called to assign semantic classification.
 
 ---
 
-## 4. Shared Task: FastAPI Modular Code Restructure
+### Phase 8: FastAPI Modular Code Restructure
 *Files: `swarm_orchestrator/bridge.py` -> `swarm_orchestrator/api/`*
-- Krishna and Akash collaborate with Aryan to split `bridge.py` into standard modular routers (`routes/replay.py`, `routes/market.py`, `routes/agents.py`, `routes/health.py`).
+
+1. Refactor monolithic 564-line `bridge.py` into clean modular structure:
+   - `api/routers/replay.py`: Historical replay upload and start endpoints.
+   - `api/routers/market.py`: Order book snapshot, trade tape, ticker.
+   - `api/routers/agents.py`: Swarm configuration, pause/resume, inspector.
+   - `api/routers/health.py`: Service health and system telemetry.
+   - `api/dependencies.py`: Dependency injection for engine state.
+2. Aligns directory structure with Aryan for authentication and multi-user database routes.
 
 ---
 
-## 5. Krishna's Pre-Push Verification Checklist
+## 4. Git Delivery & Akash Hand-Off Checklist
 
-Before pushing to GitHub for Akash:
-- [ ] Existing 34 tests pass (`pytest swarm_orchestrator/tests`).
-- [ ] Realism test suite (`test_realism.py`) passes regression checks.
+Before Akash begins model training, Krishna completes and verifies:
+
+- [ ] All 34 existing unit tests pass (`pytest swarm_orchestrator/tests`).
+- [ ] Realism test suite (`test_realism.py`) is committed and executes.
 - [ ] Retail swarm behavioral model is active in `live_agents.py`.
-- [ ] POV parent-child order splitting works in matching engine.
+- [ ] Avellaneda–Stoikov formula baseline is verified and documented.
+- [ ] POV parent-child execution schema is supported in matching engine.
 - [ ] Engine handover command is functional for Banti's control run.
+- [ ] Clean commit pushed to GitHub repository with commit message:  
+  `feat(engine): implement realism test suite, microstructure order flow, and Avellaneda-Stoikov baseline`
+
