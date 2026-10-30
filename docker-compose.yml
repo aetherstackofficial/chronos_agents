@@ -62,8 +62,6 @@ services:
       - BRIDGE_HOST=0.0.0.0
       - BRIDGE_PORT=8000
       - CHRONOS_DB=/data/chronos.db
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
       # Replay CSV uploads (POST /api/replay/upload) go on the shared volume:
       # the bridge writes /data/uploads/<file>.csv and the engine, which mounts
       # the same volume at /data, reads it at that exact path on REPLAY_START.
