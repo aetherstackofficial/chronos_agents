@@ -18,8 +18,8 @@ ORDER = ["T6_determinism", "T0_invariants", "T1_fat_tails", "T2_vol_clustering",
          "A8_no_free_lunch", "A9_leverage_asymmetry"]
 
 
-def build_report(outputs, errors, calib, cfg, mode, args, price, n_days, commit,
-                 dirty, seconds) -> dict:
+def build_report(outputs, errors, calib, cfg, mode, args, price, n_days, code_hash,
+                 seconds) -> dict:
     from validation.runner import aggregate
     seeds = sorted([o for o in outputs if o["kind"] == "seed"], key=lambda o: o["seed"])
     pr = cfg["pass_rate"]
@@ -82,11 +82,12 @@ def build_report(outputs, errors, calib, cfg, mode, args, price, n_days, commit,
     report = {
         "spec_version": cfg["spec_version"],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "simulator": {"git_commit": commit, "working_tree_dirty": dirty,
+        "simulator": {"code_hash": code_hash,
                       "config_hash": config_hash, "instrument": f"SIM~{args.instrument}",
                       "start_price": price, "bar_interval_s": 60,
                       "swarm": "live default: 15 MM (PPO), 4 whale (PPO), 80 retail (heuristic), SIM_LP; no news/oracle",
-                      "harness": "validation/sim_driver.py: in-process client, virtual 1 s/tick clock, seeded global RNGs"},
+                      "harness": ("validation/sim_driver.py: in-process client; swarm built as worker.py "
+                                  "--seed builds it (agents/swarm_factory.py: tick clock, per-agent seeded RNGs)")},
         "run": {"mode": args.mode, "n_seeds": len(seeds), "seeds": [o["seed"] for o in seeds],
                 "n_returns_per_seed": int(np.median([m["N_returns"] for m in meta])) if meta else 0,
                 "sessions_per_seed": n_days, "warmup_days": cfg["protocol"]["warmup_days"],

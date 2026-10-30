@@ -16,11 +16,13 @@ class HeuristicRetailSwarm:
     PROTOCOL.md §8 (agent behavioural noise only — never price noise).
     """
 
-    def predict(self, obs: np.ndarray, deterministic: bool = True) -> tuple:
+    def predict(self, obs: np.ndarray, deterministic: bool = True, rng=None) -> tuple:
         """Mimics the stable-baselines3 predict API: (action, state).
 
         `obs` is a batched (1, 6) observation; `deterministic` is accepted for
         API compatibility but the 10% noise rule always applies (sanctioned).
+        `rng` (a ``random.Random``, one per agent) draws that noise; None
+        falls back to the global numpy RNG.
         """
         # DummyVecEnv wraps obs in an extra array, so we grab index 0
         obs_data = obs[0]
@@ -48,7 +50,10 @@ class HeuristicRetailSwarm:
             action = -1.0  # Absolute Panic Sell
 
         # Rule 3: Pure Noise (10% of the time, the swarm does something random)
-        if np.random.rand() < 0.10:
-            action = np.random.uniform(-0.5, 0.5)
+        if rng is None:
+            if np.random.rand() < 0.10:
+                action = np.random.uniform(-0.5, 0.5)
+        elif rng.random() < 0.10:
+            action = rng.uniform(-0.5, 0.5)
 
         return np.array([[action]]), None

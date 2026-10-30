@@ -16,7 +16,7 @@ Reports land in `validation/reports/` (`report_card_*.json`, spec §13 schema).
 
 | File | Role |
 |---|---|
-| `sim_driver.py` | Headless seeded driver: live engine + orchestrator + agents, in-process client, virtual 1 s/tick clock, snapshot/restore |
+| `sim_driver.py` | Headless seeded driver: live engine + orchestrator + agents, in-process client, swarm built exactly as a seeded `worker.py` builds it (`agents/swarm_factory.py`: tick clock, per-agent seeded RNGs), snapshot/restore |
 | `data.py` | Real-data cleaning, bar series, returns, deseasonalisation, Parkinson sigma |
 | `stats_utils.py` | Block bootstrap, ACF, Ljung-Box, power-law fit, bands |
 | `checks/` | T1-T8 and A1-A9 |

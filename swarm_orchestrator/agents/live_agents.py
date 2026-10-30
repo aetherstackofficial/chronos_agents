@@ -41,10 +41,11 @@ class _LiveAgentBase:
 
     def __init__(self, agent_id: str, clock=None) -> None:
         self.agent_id = agent_id
-        self.cash, self.inventory, self.is_asleep, self.last_trade = 0.0, 0, False, 0.0
+        # last_trade = -inf: "never traded", so a cooldown never depends on
+        # where the clock happens to start.
+        self.cash, self.inventory, self.is_asleep, self.last_trade = 0.0, 0, False, float("-inf")
         self.start_equity: float | None = None
-        # Injectable clock for tests; None reads the time module at call time
-        # (the validation harness swaps that module for a virtual clock).
+        # agents.swarm_factory injects a TickClock; None reads wall time.
         self._clock = clock
 
     def _now(self) -> float:
@@ -142,18 +143,19 @@ class LiveWhaleAgent(_LiveAgentBase):
 class LiveRetailAgent(_LiveAgentBase):
     LIQUIDATION_RESET_CASH, MAX_QTY = 50_000.0, 100
 
-    def __init__(self, agent_id: str) -> None:
-        super().__init__(agent_id)
-        self.cash, self._cooldown_s = float(random.randint(10_000, 100_000)), random.uniform(2.0, 5.0)
+    def __init__(self, agent_id: str, clock=None, rng=None) -> None:
+        super().__init__(agent_id, clock)
+        self._rng = rng or random
+        self.cash, self._cooldown_s = float(self._rng.randint(10_000, 100_000)), self._rng.uniform(2.0, 5.0)
 
     def on_liquidation(self) -> None:
         self.cash, self.inventory = self.LIQUIDATION_RESET_CASH, 0
 
     def on_tick(self, tick: dict) -> list[dict]:
-        if self.is_asleep or (now := time.time()) - self.last_trade < self._cooldown_s or (last_price := float(tick["last_price"])) <= 0:
+        if self.is_asleep or (now := self._now()) - self.last_trade < self._cooldown_s or (last_price := float(tick["last_price"])) <= 0:
             return []
 
-        action, _ = retail_model.predict(build_observation(tick, self._port_return(tick)))
+        action, _ = retail_model.predict(build_observation(tick, self._port_return(tick)), rng=self._rng)
         if not (conviction := abs(raw := float(action[0][0]))):
             return []
 
@@ -166,6 +168,6 @@ class LiveRetailAgent(_LiveAgentBase):
             if self.inventory <= 0: return []
             qty, side = min(qty, self.inventory), "SELL"
 
-        self.last_trade, self._cooldown_s = now, random.uniform(2.0, 5.0)
+        self.last_trade, self._cooldown_s = now, self._rng.uniform(2.0, 5.0)
         return [{"action": side, "type": "MARKET", "qty": qty}]
         

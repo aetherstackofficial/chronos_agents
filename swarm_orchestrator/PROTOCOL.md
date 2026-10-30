@@ -44,6 +44,15 @@ All modules MUST code against these schemas exactly. Any deviation must be recor
 | `GEMINI_API_KEY` | — | Oracle scoring tier 1 (Gemini; free tier is 20 req/day/model) |
 | `GROQ_API_KEY` | — | Oracle scoring tier 2, used when tier 1 fails or its quota is spent |
 | `GROQ_MODEL` | `llama-3.3-70b-versatile` | Override if Groq retires the default model |
+| `CHRONOS_SEED` | — | Swarm worker seed (same as `worker.py --seed`); unset = unseeded swarm |
+| `CHRONOS_LOCKSTEP_WORKERS` | `0` | Engine waits for `TICK_DONE` from this many swarm workers before each physics tick (§4.3); `0` = off |
+| `CHRONOS_LOCKSTEP_TIMEOUT_S` | `10` | Longest the engine waits for a silent worker before ticking anyway (publishes a `lockstep` event) |
+
+**Reproducible live runs** need all three of: the same `INIT_SIM`/`REPLAY_START` seed, the same
+worker `--seed`, and lockstep on. The swarm then counts cooldowns in engine ticks, draws from
+per-agent RNGs seeded from the run seed, submits orders one agent at a time, and ignores paused
+ticks (`agents/swarm_factory.py`, `core/loop_manager.py`). Two such runs give the same trade tape,
+even if a worker stalls. User strategies (`STRAT_`/`USER_`) are outside lockstep by design.
 
 ## 3 · Venue model (ONE consistent venue — India/NSE style)
 
@@ -54,7 +63,7 @@ All modules MUST code against these schemas exactly. Any deviation must be recor
 | Session | 09:15 → 15:30 = **375 sim-minutes/day** |
 | Time model | **1 real second = 1 sim-minute** (one physics tick) |
 | Sim epoch | day 1 starts at unix `1767258900` (2026-01-01 09:15 IST-as-UTC) |
-| Overnight | after minute 375, clock jumps +17.5 h to next 09:15, `day_count += 1` |
+| Overnight | after minute 375, clock jumps to 09:15 of the next **weekday** (Sat/Sun skipped), `day_count += 1`. Minute `m` is stamped `09:15 + m min` on its session's date (bar-close time). Exchange holidays are not modelled. |
 | Lot size | 1 share; `qty` is always an int > 0 |
 
 ### 3.1 · Tick size bands
@@ -63,22 +72,26 @@ A single fixed tick cannot serve every price: `0.05` is 0.026 % of ₹190 but 1.
 enough that a low-priced instrument cannot move at all, which flattens every candle and saturates
 the agents' `volatility` / `volume_ratio` features.
 
+The bands are NSE's cash-market tick table, in force since 2025-04-15:
+
 | Price | Tick |
 |---|---|
-| < ₹10 | `0.001` |
-| ₹10 – ₹100 | `0.01` |
-| ₹100 – ₹1 000 | `0.05` |
-| ₹1 000 – ₹10 000 | `0.10` |
-| ₹10 000 + | `0.50` |
+| < ₹250 | `0.01` |
+| ₹250 – ₹1 000 | `0.05` |
+| ₹1 000 – ₹5 000 | `0.10` |
+| ₹5 000 – ₹10 000 | `0.50` |
+| ₹10 000 – ₹20 000 | `1.00` |
+| ₹20 000 + | `5.00` |
 
-**Review cadence.** The tick is derived at `INIT_SIM` / `REPLAY_START` and re-checked **only at
-each session open**, mirroring a real exchange's periodic slab revision. It is never re-derived
-intraday: re-gridding mid-session would strand every resting order on a price that is no longer
-valid. When a session review does change the tick (price crossed a band edge), the engine starts
-the new session with a fresh book.
+Every band was checked against real NSE 1-minute closes (Kaggle NIFTY-100 data, 2025-07 onward):
+all closes of the tested stocks sit on their band's grid.
 
-> NSE's real floor is ₹0.01; the sub-₹10 band here is finer than the live market so low-priced
-> instruments stay usable in simulation.
+**Review cadence.** The tick is derived at `INIT_SIM` / `REPLAY_START` from the start price, then
+re-checked **only on the first session of each calendar month**, from the previous month's last
+close. This matches NSE: in the real data a stock that crossed a band edge changed tick on the
+1st of the next month (HDFCBANK, SBIN, 2025–26). It is never re-derived intraday: re-gridding
+mid-session would strand every resting order on a price that is no longer valid. When a review
+does change the tick, the engine starts that session with a fresh book.
 
 ## 4 · Order-entry plane — message schemas (JSON, UTF-8, one frame after identity)
 
@@ -133,9 +146,18 @@ strict **price–time priority**. Self-trades are prevented (an order never matc
   "symbol": "TCS", "sector": "TECH" }        // CSV columns: date,time,open,high,low,close,volume
 → { "msg": "ACK", "status": "REPLAY_READY", "run_id": "...", "bars": 375, "seq": 1 }
 
+{ "msg": "HANDOVER", "at_bar": 120 }        // REPLAY only; at_bar omitted = bars replayed so far
+→ { "msg": "ACK", "status": "HANDOVER_ARMED", "at_bar": 120, "bars_replayed": 37, "seq": ... }
+   // REJECTED if not replaying, at_bar already replayed, beyond the tape, or not an int (§9)
+
 { "msg": "PAUSE" }  |  { "msg": "RESUME" }  → ACK status "PAUSED" | "RUNNING"
 { "msg": "FETCH_STATE" }                    → the current tick payload (§5.1) — poll fallback
 { "msg": "PING" }                           → { "msg": "ACK", "status": "PONG", ... }
+
+// Swarm worker → engine server, after acting on every unpaused tick (lockstep, §2).
+{ "msg": "TICK_DONE", "agent_id": "SWARM_ALL_1234", "tick_seq": 812 }   // tick_seq = that tick's seq
+→ { "msg": "ACK", "status": "TICK_DONE" | "TICK_DONE_STALE", "seq": ... }
+// Handled by engine/server.py, not the engine core; harmless (STALE) when lockstep is off.
 ```
 
 ## 5 · Market-data plane — PUB topics (multipart: [topic-bytes, json-bytes])
@@ -183,9 +205,11 @@ strict **price–time priority**. Self-trades are prevented (an order never matc
 { "seq": ..., "kind": "news",        "headline": "...", "score": -0.62,
   "sector": "TECH", "reasoning": "...", "source": "gemini" | "fallback" }
 { "seq": ..., "kind": "liquidation", "agent_id": "RETAIL_12" }   // engine reset ledger to 50k
-{ "seq": ..., "kind": "mode_change", "mode": "REACTIVE", "trigger_agent": "STRAT_ab12" }
+{ "seq": ..., "kind": "mode_change", "mode": "REACTIVE", "trigger_agent": "STRAT_ab12" | "HANDOVER",
+               "bars_replayed": 120, "bars_remaining": 255 }
 { "seq": ..., "kind": "session",     "action": "day_open" | "day_close" | "reset" | "paused" | "resumed",
                "day_count": 2 }
+{ "seq": ..., "kind": "lockstep",    "action": "timeout", "missing_workers": 1 }   // run no longer reproducible
 ```
 
 ## 6 · Bridge (FastAPI :8000)
@@ -201,6 +225,7 @@ strict **price–time priority**. Self-trades are prevented (an order never matc
 | `POST /api/sim/resume` | `{}` → `{status}` |
 | `POST /api/news` | `{headline}` → `{status:"accepted"}` (score arrives via `event`) |
 | `POST /api/replay/start` | `{csv_path, symbol?, sector?, seed?}` → `{status, run_id, bars}` |
+| `POST /api/replay/handover` | `{at_bar?}` → `{status, at_bar, bars_replayed}`; 409 with the reason if rejected (§9) |
 | `POST /api/strategy/run` | `{name, code}` → `{strategy_id, agent_id}` (python only) |
 | `POST /api/strategy/stop` | `{strategy_id}` → `{status}` |
 | `GET /api/strategy/list` | → `[{strategy_id, agent_id, name, status, started_at}]` |
@@ -257,13 +282,31 @@ Batched writes once per tick; readers (bridge) open read-only.
 - `REPLAY_START` loads a CSV of 1-minute bars. Engine enters `mode="REPLAY"`, seeds RNG.
 - Each physics tick = next historical minute. The engine's **HistoricalReplayer** drives the
   tape THROUGH the real book: it manages `SIM_LP`-style bracketing depth around the historical
-  path and fires ghost market orders so trades print o→h→l→c inside the minute. Swarm agents
+  path and fires ghost orders so trades print the bar's prices inside the minute. Swarm agents
   may trade during replay; their fills are real but the replayer re-anchors price to history.
+- **Fidelity (swarm off):** every bar is reproduced exactly — o, h, l, c to the paisa and the full
+  volume (no cap). The first print is at the open (bars open at their first trade in every mode,
+  not at the previous close); every print stays inside [l, h]. The path is o→h→l→c or o→l→h→c,
+  whichever needs fewer prints (a bar does not record which extreme came first). A zero-volume
+  bar flat at the previous close prints nothing. A tape bar with fewer shares than the prints its
+  prices need (seen in thin names' vendor data) keeps its prices and prints the minimum volume;
+  such bars are listed in `HistoricalReplayer.inexact_bars`.
+- Replay timestamps and tick reviews follow the sim calendar (§3), not the CSV's own dates.
 - **The latch:** the FIRST fill whose buyer or seller `agent_id` starts with `STRAT_` or `USER_`
   flips `mode` to `"REACTIVE"` permanently (published as `event kind=mode_change`). From then on
   the replayer stops re-anchoring; the book + swarm own the price. State carries over seamlessly
   (book, ledgers, RSI window, regime inferred from recent drift) — no price gap.
 - Same seed + same CSV + no user trade ⇒ bit-identical history (tested).
+- **Hand-over (control runs):** `HANDOVER {at_bar: N}` (or `POST /api/replay/handover`) flips to
+  REACTIVE with no user trade, at the start of the physics tick that would replay bar N+1 — the
+  same point at which a user trade placed after bar N latches. Book, ledgers, RSI window and the
+  RNG stream carry over (no reseed). A control run (HANDOVER at N) and a treatment run (user
+  trades after bar N) are therefore identical up to the switch and differ afterwards only by
+  the user's own orders. A later HANDOVER replaces an armed one; the user-trade latch still
+  applies if it comes first; `at_bar` = tape length hands over instead of pausing at tape end.
+  The rest of the tape is not replayed; the CSV itself is the record of what history did next.
+  For a reproducible control run with the swarm on, use a seeded worker with lockstep (§2) or the
+  in-process harness (`validation/sim_driver.py`).
 
 ## 10 · Strategy SDK (runner/sdk.py)
 
