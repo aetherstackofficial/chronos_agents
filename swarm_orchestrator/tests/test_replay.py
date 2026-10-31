@@ -148,3 +148,36 @@ def test_clock_continues_from_file_time_after_latch(replay_csv):
                       "type": "MARKET", "qty": 5})
     assert e.mode == "REACTIVE"
     assert _tick(e.physics_tick())["unix_time"] == last + 60    # no jump back to 2026-01-01
+
+
+# --- nobody but a strategy trades while history replays ------------------------
+def test_agents_cannot_trade_during_replay(replay_csv):
+    e = MatchingEngine()
+    e.start_replay(replay_csv, "TCS", "TECH", seed=7)
+    e.physics_tick()
+    for agent in ("MM_1", "WHALE_1", "RETAIL_1", "REDTEAM_1", "GEMINI_ORACLE"):
+        ack, _ = e.handle_message({"msg": "ORDER", "agent_id": agent, "action": "BUY",
+                                   "type": "LIMIT", "price": 100.0, "qty": 1})
+        assert ack["status"] == "REJECTED" and "replay in progress" in ack["reason"]
+        assert agent not in e.agent_ledger            # refused before any account exists
+    assert e.mode == "REPLAY"
+
+
+def test_strategy_may_trade_then_agents_resume_after_the_hand_over(replay_csv):
+    e = MatchingEngine()
+    e.start_replay(replay_csv, "TCS", "TECH", seed=7)
+    for _ in range(3):
+        e.physics_tick()
+    ack, _ = e.handle_message({"msg": "ORDER", "agent_id": "STRAT_me", "action": "BUY",
+                               "type": "MARKET", "qty": 5})
+    assert ack["status"] != "REJECTED" and e.mode == "REACTIVE"
+    ack, _ = e.handle_message({"msg": "ORDER", "agent_id": "MM_1", "action": "SELL",
+                               "type": "MARKET", "qty": 1})
+    assert ack["status"] != "REJECTED"                # the swarm is allowed again
+
+
+def test_ping_and_fetch_state_still_work_during_replay(replay_csv):
+    e = MatchingEngine()
+    e.start_replay(replay_csv, "TCS", "TECH", seed=7)
+    assert e.handle_message({"msg": "PING"})[0]["status"] == "PONG"
+    assert e.handle_message({"msg": "FETCH_STATE"})[0]["status"] == "STATE"

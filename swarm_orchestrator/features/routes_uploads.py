@@ -1,7 +1,7 @@
 """Bring-your-own replay data: CSV upload and Yahoo Finance download.
 
 * ``POST /api/replay/upload`` -- upload your own 1-minute bar CSV.
-* ``POST /api/replay/yahoo``  -- download 1m/15m bars from Yahoo Finance
+* ``POST /api/replay/yahoo``  -- download 15-minute bars from Yahoo Finance
   (features/yahoo.py), saved as a CSV in the same folder.
 
 Both end the same way: a CSV on disk, checked, and a ``csv_path`` to pass to
@@ -191,7 +191,7 @@ async def upload_replay_csv(request: Request,
 # --------------------------------------------------------------------------- #
 class YahooReq(BaseModel):
     symbol: str                 # e.g. "RELIANCE.NS" (NSE) / "RELIANCE.BO" (BSE)
-    interval: str = "1m"        # "1m" (last ~29 days) or "15m" (last ~59 days)
+    interval: str = "15m"       # the only supported interval (last ~59 days)
     days: int = 5               # how many calendar days back from now
 
 

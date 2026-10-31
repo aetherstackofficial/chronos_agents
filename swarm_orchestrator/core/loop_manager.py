@@ -41,6 +41,10 @@ class SwarmOrchestrator:
 
     async def _on_tick(self, tick: dict) -> None:
         self._tick_count += 1
+        # A replay is history playing back: agents stay silent (the engine would
+        # reject their orders anyway) until a strategy's first fill hands over.
+        if tick.get("mode") == "REPLAY":
+            return
         awake_ratio = self.NEWS_AWAKE_RATIO if self.news_active else self.QUIET_AWAKE_RATIO
         
         batches = []

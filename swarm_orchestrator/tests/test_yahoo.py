@@ -53,11 +53,11 @@ def fake_yf(monkeypatch):
 
 # --- limits are enforced before Yahoo is called ------------------------------
 @pytest.mark.parametrize("symbol,interval,days,needle", [
-    ("RELIANCE.NS", "1m", 30, "1-29"),
+    ("RELIANCE.NS", "1m", 3, "15-minute"),        # 1-minute Yahoo data is no longer offered
     ("RELIANCE.NS", "15m", 60, "1-59"),
     ("RELIANCE.NS", "5m", 3, "interval"),
-    ("RELIANCE.NS", "1m", 0, "1-29"),
-    ("../etc", "1m", 3, "invalid symbol"),
+    ("RELIANCE.NS", "15m", 0, "1-59"),
+    ("../etc", "15m", 3, "invalid symbol"),
 ])
 def test_limits_rejected_without_calling_yahoo(fake_yf, symbol, interval, days, needle):
     with pytest.raises(yahoo.YahooError) as exc:
@@ -66,13 +66,10 @@ def test_limits_rejected_without_calling_yahoo(fake_yf, symbol, interval, days, 
     assert fake_yf["calls"] == []
 
 
-def test_1m_is_split_into_7_day_requests(fake_yf):
-    out = yahoo.fetch_bars("reliance.ns", "1m", 20, now=NOW)
-    windows = [(s, e) for _, s, e, _ in fake_yf["calls"]]
-    assert len(windows) == 3                                    # 7 + 7 + 6 days
-    assert all(e - s <= dt.timedelta(days=7) for s, e in windows)
-    assert windows[0][0] == NOW - dt.timedelta(days=20) and windows[-1][1] == NOW
-    assert out["symbol"] == "RELIANCE.NS"                       # upper-cased
+def test_windows_helper_still_splits_long_ranges():
+    start = NOW - dt.timedelta(days=20)
+    windows = yahoo._windows(start, NOW, 7)
+    assert len(windows) == 3 and windows[0][0] == start and windows[-1][1] == NOW
 
 
 def test_15m_is_one_request(fake_yf):
@@ -81,7 +78,7 @@ def test_15m_is_one_request(fake_yf):
 
 
 def test_rows_keep_exchange_time_and_drop_duplicates(fake_yf):
-    out = yahoo.fetch_bars("RELIANCE.NS", "1m", 20, now=NOW)   # same 3 bars x 3 chunks
+    out = yahoo.fetch_bars("RELIANCE.NS", "15m", 20, now=NOW)
     assert len(out["rows"]) == 3
     assert (out["rows"][0]["date"], out["rows"][0]["time"]) == ("2026-10-23", "09:15")
 
@@ -89,14 +86,14 @@ def test_rows_keep_exchange_time_and_drop_duplicates(fake_yf):
 def test_empty_result_gives_ns_hint(fake_yf):
     fake_yf["state"]["frame"] = lambda s, e: pd.DataFrame()
     with pytest.raises(yahoo.YahooError) as exc:
-        yahoo.fetch_bars("RELIANCE", "1m", 3, now=NOW)
+        yahoo.fetch_bars("RELIANCE", "15m", 3, now=NOW)
     assert exc.value.status == 404 and "RELIANCE.NS" in exc.value.message
 
 
 def test_yahoo_exception_becomes_502(fake_yf):
     fake_yf["state"]["error"] = RuntimeError("Too Many Requests")
     with pytest.raises(yahoo.YahooError) as exc:
-        yahoo.fetch_bars("RELIANCE.NS", "1m", 3, now=NOW)
+        yahoo.fetch_bars("RELIANCE.NS", "15m", 3, now=NOW)
     assert exc.value.status == 502 and "rate-limiting" in exc.value.message
 
 
@@ -104,7 +101,7 @@ def test_inconsistent_bar_is_repaired(fake_yf):
     # High below Close: the replayer would reject this bar, so it is widened.
     fake_yf["state"]["frame"] = lambda s, e: _frame(
         dt.datetime(2026, 10, 23, 9, 15, tzinfo=IST), 2, high_bump=0.1)
-    out = yahoo.fetch_bars("RELIANCE.NS", "1m", 3, now=NOW)
+    out = yahoo.fetch_bars("RELIANCE.NS", "15m", 3, now=NOW)
     assert out["repaired"] == 2
     assert all(r["high"] >= r["close"] for r in out["rows"])
 
@@ -125,20 +122,20 @@ def client(fake_yf, tmp_path, monkeypatch):
 
 def test_endpoint_saves_csv_and_engine_replays_it(client, tmp_path):
     r = client.post("/api/replay/yahoo",
-                    json={"symbol": "RELIANCE.NS", "interval": "1m", "days": 3})
+                    json={"symbol": "RELIANCE.NS", "interval": "15m", "days": 3})
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["source"] == "yahoo" and body["bars"] == 3
     assert os.path.dirname(body["csv_path"]) == str(tmp_path)
-    assert os.path.basename(body["csv_path"]).startswith("yahoo_RELIANCE_NS_1m_2026-10-23")
+    assert os.path.basename(body["csv_path"]).startswith("yahoo_RELIANCE_NS_15m_2026-10-23")
     _, n = MatchingEngine().start_replay(body["csv_path"], "RELIANCE.NS", "ENERGY")
     assert n == 3
 
 
 def test_endpoint_reports_errors(client, fake_yf, tmp_path):
-    r = client.post("/api/replay/yahoo", json={"symbol": "RELIANCE.NS", "interval": "1m", "days": 30})
+    r = client.post("/api/replay/yahoo", json={"symbol": "RELIANCE.NS", "interval": "15m", "days": 60})
     assert r.status_code == 400
     fake_yf["state"]["frame"] = lambda s, e: pd.DataFrame()
-    r = client.post("/api/replay/yahoo", json={"symbol": "RELIANCE", "interval": "1m", "days": 3})
+    r = client.post("/api/replay/yahoo", json={"symbol": "RELIANCE", "interval": "15m", "days": 3})
     assert r.status_code == 404 and ".NS" in r.json()["detail"]
     assert os.listdir(tmp_path) == []           # failed downloads leave no file

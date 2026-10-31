@@ -41,7 +41,7 @@ const CSS = `
 /**
  * Stocks offered in the picker, grouped by the sector the engine understands
  * (TECH / BANK / OIL / PHARMA / DEFENSE — used by the news oracle). Every
- * symbol here was checked against Yahoo's 1-minute data. Indian stocks need
+ * symbol here was checked against Yahoo's Indian-stock data. Indian stocks need
  * the .NS (NSE) suffix. Tata Motors is absent on purpose: it was split into
  * new tickers and TATAMOTORS.NS returns nothing.
  */
@@ -55,8 +55,9 @@ const STOCKS = {
 };
 const SECTORS = Object.keys(STOCKS);
 const OTHER = '__other__';
-// Yahoo limits (server enforces the same): 1m ≈ last 29 days, 15m ≈ last 59.
-const MAX_DAYS = { '1m': 29, '15m': 59 };
+// Yahoo offers only 15-minute bars here (the server enforces the same): up to the last 59 days.
+const INTERVAL = '15m';
+const MAX_DAYS = 59;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -110,8 +111,8 @@ export default {
   <!-- Source 1: pick a stock, bring its data from Yahoo Finance. -->
   <section class="card rd-card" aria-labelledby="rd-y-title">
     <h3 id="rd-y-title">${ic(ctx, 'candles')} Pick a stock (Yahoo Finance)</h3>
-    <p>Choose a stock and how much history you want. The server downloads the 1-minute or
-       15-minute bars from Yahoo Finance, saves them as a CSV, and replays from that file.</p>
+    <p>Choose a stock and how much history you want. The server downloads the 15-minute
+       candles from Yahoo Finance, saves them as a CSV, and replays from that file.</p>
     <div class="rd-form">
       <label class="field rd-stock">Stock
         <select class="select" id="rd-stock" aria-label="Stock">
@@ -127,20 +128,17 @@ export default {
           ${SECTORS.map((s) => `<option value="${s}">${s}</option>`).join('')}
         </select>
       </label>
-      <label class="field">Interval
-        <select class="select" id="rd-int" aria-label="Bar interval">
-          <option value="1m">1 minute</option>
-          <option value="15m">15 minutes</option>
-        </select>
+      <label class="field">Candle size
+        <input class="input" value="15 minutes" disabled aria-label="Candle size (fixed at 15 minutes)">
       </label>
       <label class="field rd-num">Calendar days back
-        <input class="input mono" id="rd-days" type="number" value="5" min="1" max="29" aria-label="Calendar days of data">
+        <input class="input mono" id="rd-days" type="number" value="5" min="1" max="59" aria-label="Calendar days of data">
       </label>
       <button class="btn btn-primary" id="rd-yahoo-btn">Download &amp; Replay</button>
     </div>
     <div class="rd-note">Indian stocks need <span class="mono">.NS</span> (NSE) or <span class="mono">.BO</span> (BSE).
-      Yahoo keeps 1-minute bars for about 30 days and 15-minute bars for about 60 days; 15-minute bars
-      replay one per simulated minute. Yahoo is unofficial and may rate-limit — if so, try again in a few minutes.</div>
+      Yahoo keeps 15-minute candles for about 60 days. Each candle replays as one simulated minute, and while a
+      replay runs the AI agents stay silent until your strategy's first trade. Yahoo is unofficial and may rate-limit — if so, try again in a few minutes.</div>
   </section>
 
   <!-- Source 2: the user's own CSV. -->
@@ -215,7 +213,6 @@ export default {
     const stockSel = $('#rd-stock');
     const customWrap = $('#rd-custom-wrap');
     const sectorWrap = $('#rd-sector-wrap');
-    const intSel = $('#rd-int');
     const daysIn = $('#rd-days');
     const yBtn = $('#rd-yahoo-btn');
     const isOther = () => stockSel.value === OTHER;
@@ -229,19 +226,13 @@ export default {
     };
     stockSel.addEventListener('change', () => { syncYahoo(); msg.hidden = true; });
     $('#rd-custom').addEventListener('input', syncYahoo);
-    // The day limit follows the interval (the server enforces it as well).
-    intSel.addEventListener('change', () => {
-      const max = MAX_DAYS[intSel.value];
-      daysIn.max = String(max);
-      if (Number(daysIn.value) > max) daysIn.value = String(max);
-    });
     syncYahoo();
     yBtn.addEventListener('click', () => {
       if (!yCanRun()) return;
       const symbol = ySymbol();
       fetchThenReplay(yBtn, 'Download', 'Downloading from Yahoo…',
         () => ctx.api.replayYahoo({
-          symbol, interval: intSel.value, days: parseInt(daysIn.value, 10) || 5,
+          symbol, interval: INTERVAL, days: Math.min(MAX_DAYS, parseInt(daysIn.value, 10) || 5),
         }),
         { symbol, sector: ySector() },
         (s) => `Downloaded ${s.bars} ${s.interval} bars of ${s.symbol} (${s.first_bar} to ${s.last_bar}), saved as ${s.filename}.`,
