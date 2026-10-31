@@ -14,10 +14,21 @@ const listeners = {
   trade: new Set(),
   event: new Set(),
   status: new Set(),
+  reset: new Set(),   // a different run started: history was cleared
 };
 
 /** Ring buffer of the last TRADE_RING trade payloads (§5.2), oldest first. */
 const trades = [];
+
+/**
+ * Candle history of the CURRENT run, oldest first. Views are destroyed when you
+ * switch pages, so the chart cannot keep its own history: it is kept here (the
+ * socket and this store live for the whole session) and the Market view redraws
+ * from it when it is shown again. Cleared only when a new run starts.
+ */
+const BAR_CAP = 6000;
+const bars = [];
+let runId = null;
 
 let ws = null;
 let reconnectTimer = null;
@@ -79,6 +90,19 @@ export const store = {
     return unsub;
   },
 
+  /**
+   * Subscribe to "a different run started" (new START, replay, stock or reset).
+   * Fired before that run's first tick; the candle history and tape are already cleared.
+   * @returns {() => void} unsubscribe
+   */
+  onReset(fn) { return subscribe(listeners.reset, fn); },
+
+  /**
+   * @returns {{time:number, open:number, high:number, low:number, close:number, volume:number}[]}
+   *   every candle of the current run so far, oldest first (a copy)
+   */
+  bars() { return bars.slice(); },
+
   /** @returns {object|null} the most recent tick payload, or null before START */
   latestTick() { return store.state.tick; },
 
@@ -98,6 +122,17 @@ export const store = {
  */
 function dispatch(topic, data) {
   if (topic === 'tick') {
+    if (data.run_id && data.run_id !== runId) {
+      // A new run (new stock / START / replay / reset): drop the old run's candles and prints.
+      const hadRun = runId !== null;
+      runId = data.run_id;
+      if (hadRun) {
+        bars.length = 0;
+        trades.length = 0;
+        emit(listeners.reset, data);
+      }
+    }
+    recordBar(data);
     store.state.tick = data;
     store.state.mode = data.mode ?? store.state.mode;
     store.state.day = data.day_count ?? store.state.day;
@@ -111,6 +146,23 @@ function dispatch(topic, data) {
   } else if (topic === 'event') {
     if (data.kind === 'mode_change' && data.mode) store.state.mode = data.mode;
     emit(listeners.event, data);
+  }
+}
+
+/**
+ * Add the tick's closed bar to the history: same minute replaces (a paused engine
+ * re-sends its last bar), a later minute appends, an older one is ignored so the
+ * series stays strictly ascending for the chart.
+ */
+function recordBar(tick) {
+  if (!tick.bar || !Number.isFinite(tick.unix_time)) return;
+  const time = tick.unix_time - (tick.unix_time % 60);
+  const b = { time, open: tick.bar.o, high: tick.bar.h, low: tick.bar.l, close: tick.bar.c, volume: tick.bar.v };
+  const last = bars[bars.length - 1];
+  if (last && last.time === time) bars[bars.length - 1] = b;
+  else if (!last || time > last.time) {
+    bars.push(b);
+    if (bars.length > BAR_CAP) bars.splice(0, bars.length - BAR_CAP);
   }
 }
 

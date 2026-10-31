@@ -113,6 +113,9 @@ export default {
         + `<span>V <b>${fmt.num(b.volume, 0)}</b></span>`;
     };
     this._chart.crosshairReadout((bar) => { this._hovering = !!bar; renderReadout(bar); });
+    // Coming back from another page: redraw every candle of the running chart, not just the last one.
+    const history = store.bars();
+    if (history.length) this._chart.setData(history);
 
     /* ---- order book ---- */
     this._asks = charts.depthBars(this._els.asks, {
@@ -204,6 +207,14 @@ export default {
       pushTrade(t);
     }));
     this._subs.push(store.onTick(applyTick));
+    // A different run started (new stock / replay / START / reset): start the chart and tape afresh.
+    this._subs.push(store.onReset(() => {
+      if (this._chart) this._chart.setData([]);
+      this._latestBar = null;
+      this._els.readout.hidden = true;
+      this._els.tape.innerHTML = '<div class="dim" style="padding:var(--s-3)">no prints yet</div>';
+      this._tapeEmpty = true;
+    }));
 
     // Seed everything from the cached tick (bridge replays it on WS connect).
     applyTick(store.latestTick());
