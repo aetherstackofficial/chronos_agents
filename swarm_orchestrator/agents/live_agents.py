@@ -2,6 +2,7 @@ import logging
 import os
 import random
 import time
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 from agents.environments import MarketMakerEnv, SmartMoneyEnv
 from agents.execution import PovSlicer, VolumeCurve, skew_ticks, snap
 from agents.features import build_observation
+from agents.levels import anchor_exit_prices, build_levels, pick_level
 from agents.heuristic_retail import CONFIG as RETAIL_CONFIG
 from agents.heuristic_retail import (Position, conviction, draw, draw_exit_plan, exit_reason,
                                      limit_price, order_qty, sample_personality)
@@ -48,6 +50,7 @@ class _LiveAgentBase:
         # where the clock happens to start.
         self.cash, self.inventory, self.is_asleep, self.last_trade = 0.0, 0, False, float("-inf")
         self.start_equity: float | None = None
+        self._equity_day: int | None = None
         # agents.swarm_factory injects a TickClock; None reads wall time.
         self._clock = clock
 
@@ -62,6 +65,19 @@ class _LiveAgentBase:
         if (pos := ack.get("pos")) is not None: self.inventory = int(pos)
 
     def _port_return(self, tick: dict) -> float:
+        """Portfolio return since the START OF THE CURRENT SESSION.
+
+        A training episode is one trading day (market_simulator/base_environment.py
+        reset(): one random date, capital back to its initial value), so the models
+        only ever saw returns of a few percent within a day (VecNormalize std
+        ~0.01). Measured from the start of the run instead, a whale that has
+        built a position over weeks showed +143% on average, 93% of its inputs
+        sat on the +10 clip, and its policy froze at "maximum long" and stopped
+        trading once full. The base resets at every session open.
+        """
+        day = int(tick.get("day_count", 0))
+        if day != self._equity_day:
+            self._equity_day, self.start_equity = day, None
         equity = self.cash + self.inventory * float(tick["last_price"])
         if self.start_equity is None:
             if self.cash <= 0: return 0.0
@@ -178,6 +194,10 @@ class LiveRetailAgent(_LiveAgentBase):
         self._last_trade_t: int | None = None
         self.position: Position | None = None
         self.closed_trades: list[dict] = []   # realised results, newest last
+        # Shared market history (set by the orchestrator; None until then). Optional:
+        # without it agents still use round numbers, they just have no history levels.
+        self.context = None
+        self._tick_size = 0.05                # last tick size seen, for exit levels
         self._pending: dict | None = None     # order sent, submit-ack not back yet
         self._working: dict | None = None     # limit order resting in the book
         self._order_n = 0
@@ -233,7 +253,8 @@ class LiveRetailAgent(_LiveAgentBase):
             pos = self.position
             if pos is None:
                 self.position = Position(side=order["side"], qty=qty, entry_price=avg,
-                                         entry_t=order["t"], plan=order["plan"], best_price=avg)
+                                         entry_t=order["t"], plan=self._level_plan(order["plan"], order["side"], avg),
+                                         best_price=avg)
             else:  # a resting entry order filled in more than one piece
                 total = pos.qty + qty
                 pos.entry_price = (pos.entry_price * pos.qty + avg * qty) / total
@@ -256,6 +277,15 @@ class LiveRetailAgent(_LiveAgentBase):
             self.position = None
             self._feel(trade)
 
+    def _level_plan(self, plan, side: int, entry: float):
+        """For agents with the level-exit trait, a target/stop plan gets its
+        take-profit just short of a level and its stop just beyond one."""
+        if not self.personality.level_exits or plan.style != "target_stop":
+            return plan
+        tp, stop = anchor_exit_prices(side, entry, plan.take_profit_pct, plan.stop_loss_pct,
+                                      self._tick_size, self.context, self._cfg)
+        return replace(plan, take_profit_price=tp, stop_price=stop) if (tp or stop) else plan
+
     def _feel(self, trade: dict) -> None:
         """Emotional reaction to a realised result."""
         emo = self._cfg["emotions"]
@@ -276,6 +306,7 @@ class LiveRetailAgent(_LiveAgentBase):
     # -- decisions -----------------------------------------------------------
     def on_tick(self, tick: dict) -> list[dict]:
         t, price, day = self._tick_index(tick), float(tick["last_price"]), int(tick["day_count"])
+        self._tick_size = float(tick.get("tick_size") or self._tick_size)
         if day != self._day:
             self._day = day
             if self._cfg["emotions"]["capitulation"]["streak_resets_on_new_day"]:
@@ -367,9 +398,18 @@ class LiveRetailAgent(_LiveAgentBase):
         if urgent or self._rng.random() < orders["type_mix"]["market"]:
             return "MARKET", None, 0
         lim = orders["limit"]
+        tick_size = float(tick["tick_size"])
         offset = self._rng.choices(lim["offset_ticks_choices"], weights=lim["offset_ticks_weights"])[0]
-        px = limit_price(side, tick.get("best_bid"), tick.get("best_ask"), price,
-                         float(tick["tick_size"]), offset)
+        px = limit_price(side, tick.get("best_bid"), tick.get("best_ask"), price, tick_size, offset)
+        # Some limit orders go to a price level instead (round number, previous-day
+        # high, swing point). This is what makes support and resistance form.
+        lv = self._cfg.get("levels")
+        if lv and self._rng.random() < float(lv["anchor_prob"]):
+            levels = build_levels(price, tick_size, self.context, self._cfg)
+            anchored = pick_level(side, tick.get("best_bid"), tick.get("best_ask"), price,
+                                  tick_size, levels, self._rng, self._cfg)
+            if anchored is not None:
+                px = anchored
         return "LIMIT", px, int(draw(lim["tif_ticks"], self._rng))
 
     def _order(self, side: int, qty: int, kind: str, t: int, otype: str, limit_px, tif: int,

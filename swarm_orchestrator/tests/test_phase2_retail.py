@@ -119,10 +119,12 @@ def test_type_mix_is_about_40_40_20():
 
 
 def test_starting_cash_is_heavy_tailed_with_few_rich_agents():
+    spec = hr.CONFIG["wealth"]["starting_cash"]["per_agent"]
     cash = [hr.sample_personality(f"RETAIL_{i}", 3).start_cash for i in range(4000)]
-    assert statistics.median(cash) == pytest.approx(42_600, rel=0.10)
+    assert statistics.median(cash) == pytest.approx(spec["minimum"] * 2 ** (1 / spec["shape"]), rel=0.10)
     assert statistics.mean(cash) > 1.5 * statistics.median(cash)  # heavy right tail
-    assert sum(c > 1_000_000 for c in cash) / len(cash) < 0.02
+    cap_cash = hr.CONFIG["wealth"]["max_position"]["hard_cap_shares"] * 1354.0   # cash needed for the ceiling
+    assert sum(c >= cap_cash for c in cash) / len(cash) < 0.03                   # the ceiling is rare
 
 
 def test_engine_default_cash_source_gives_everyone_50k():
@@ -214,7 +216,7 @@ def _pers(kind="momentum", **kw):
     base = hr.sample_personality("RETAIL_T", 1)
     fields = dict(kind=kind, rsi_center=50.0, conviction_threshold=0.20, cooldown_ticks=3,
                   risk_appetite=0.05, start_cash=100_000.0,
-                  exit_preference=(1.0, 0.0, 0.0, 0.0))
+                  exit_preference=(1.0, 0.0, 0.0, 0.0), level_exits=False)
     fields.update(kw)
     return replace(base, **fields)
 
@@ -356,6 +358,7 @@ def _agent(kind="momentum", allow_short=True, **kw):
     cfg["personality"]["noise_agent"]["trade_prob_per_tick"] = 1.0
     cfg["wealth"]["allow_short"] = allow_short
     cfg["orders"]["type_mix"] = {"market": 1.0, "limit": 0.0}          # market orders only
+    cfg["levels"]["anchor_prob"] = 0.0                                 # levels have their own tests
     cfg["emotions"]["loss_overtrade"]["probability"] = 0.0             # emotions have their own tests
     cfg["emotions"]["profit_fear"]["probability"] = 0.0
     cfg["emotions"]["capitulation"]["consecutive_losses"] = 99
@@ -558,6 +561,7 @@ def _agent2(kind="momentum", market=1.0, emotions=False, hold=5, edit=None, **kw
     cfg["personality"]["base_trade_prob"] = 1.0
     cfg["personality"]["noise_agent"]["trade_prob_per_tick"] = 1.0
     cfg["orders"]["type_mix"] = {"market": market, "limit": 1.0 - market}
+    cfg["levels"]["anchor_prob"] = 0.0                                 # levels have their own tests
     if hold is not None:
         cfg["exits"]["time_based"]["hold_ticks"] = {"dist": "uniform_int", "low": hold, "high": hold}
     if not emotions:

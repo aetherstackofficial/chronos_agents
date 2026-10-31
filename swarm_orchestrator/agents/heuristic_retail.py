@@ -74,6 +74,7 @@ class RetailPersonality:
     max_position_cap: int           # hard ceiling in shares (long or short)
     leverage_limit: float           # position value may not exceed cash * this
     exit_preference: tuple          # weights over _EXIT_STYLES, sums to 1
+    level_exits: bool = False       # sets target/stop relative to price levels (some agents only)
 
     def max_shares_at_price(self, price: float) -> int:
         """Largest position (shares) this agent may hold at `price`."""
@@ -119,11 +120,15 @@ def sample_personality(agent_id: str, run_seed, cfg: Optional[dict] = None) -> R
     cap = min(int(mp["hard_cap_shares"]),
               int(mp["reference_whale_min_capacity"] * mp["fraction_of_whale"]))
 
+    # Drawn last, so adding this trait did not move any earlier draw.
+    level_exits = rng.random() < float(cfg.get("levels", {}).get("level_exit_share", 0.0))
+
     return RetailPersonality(
         agent_id=agent_id, kind=kind, rsi_center=rsi_center,
         conviction_threshold=threshold, cooldown_ticks=cooldown,
         risk_appetite=risk, start_cash=start_cash, max_position_cap=cap,
-        leverage_limit=float(mp["leverage_limit"]), exit_preference=exit_pref)
+        leverage_limit=float(mp["leverage_limit"]), exit_preference=exit_pref,
+        level_exits=level_exits)
 
 
 # --------------------------------------------------------------------------- #
@@ -192,6 +197,8 @@ class ExitPlan:
     stop_loss_pct: float = 0.0      # target_stop
     trail_pct: float = 0.0          # trailing_stop
     fear_take_profit_pct: float = 0.0   # >0: "scared of losing its profit", sells at this small gain
+    take_profit_price: float = 0.0  # >0: target_stop uses this price instead of take_profit_pct
+    stop_price: float = 0.0         # >0: target_stop uses this price instead of stop_loss_pct
 
 
 @dataclass
@@ -258,9 +265,13 @@ def exit_reason(pos: Position, price: float, t: int, signal: float,
     if plan.style == "time_based":
         return "time" if held >= plan.hold_ticks else None
     if plan.style == "target_stop":
-        if move_pct >= plan.take_profit_pct:
+        hit_target = (pos.side * (price - plan.take_profit_price) >= 0 if plan.take_profit_price
+                      else move_pct >= plan.take_profit_pct)
+        hit_stop = (pos.side * (price - plan.stop_price) <= 0 if plan.stop_price
+                    else move_pct <= -plan.stop_loss_pct)
+        if hit_target:
             return "take_profit"
-        if move_pct <= -plan.stop_loss_pct:
+        if hit_stop:
             return "stop_loss"
         return None
     if plan.style == "trailing_stop":
