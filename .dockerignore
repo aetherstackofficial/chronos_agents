@@ -27,6 +27,8 @@ frontend/dist
 swarm_orchestrator/.strategies
 swarm_orchestrator/scripts_library
 swarm_orchestrator/data/scenarios
+# Local replay uploads; in Docker they live on the chronos_data volume instead
+swarm_orchestrator/data/uploads
 **/*.db
 **/*.db-wal
 **/*.db-shm

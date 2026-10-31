@@ -18,6 +18,8 @@ swarm_orchestrator/.env
 swarm_orchestrator/.strategies/
 swarm_orchestrator/scripts_library/
 swarm_orchestrator/data/scenarios/
+# User replay CSVs saved by POST /api/replay/upload (local, non-Docker runs)
+swarm_orchestrator/data/uploads/
 *.db
 *.db-wal
 *.db-shm
@@ -46,3 +48,7 @@ refurbish_v1_2026-09-29.md
 # Real NSE reference data (Kaggle, ~55 MB/stock)
 # Fetched by the validation data pipeline
 swarm_orchestrator/data/real/
+
+Banti_Backtesting_Tasks_Explained.pdf
+Chronos_Architecture_and_Change_Report.pdf
+Chronos_Explained_Simply.pdf

@@ -4,6 +4,7 @@ import random
 from typing import Iterable, List
 
 from core.engine_client import EngineClient
+from core.market_context import MarketContext
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +21,42 @@ class SwarmOrchestrator:
         # agents.swarm_factory.TickClock shared with the agents; set from each
         # tick before any agent acts.
         self.clock = clock
+        # One shared market-history object (core/market_context.py). Fed once per
+        # tick below, before any agent acts; agents read it as ``agent.context``.
+        # It only reports what happened and never gates an agent.
+        self.context = MarketContext()
         self._tick_count = 0
         self._last_news_tick = -self.NEWS_WINDOW_TICKS
 
     def load_agents(self, agents_list: Iterable) -> None:
         self.agents = list(agents_list)
+        for agent in self.agents:
+            agent.context = self.context
 
     @property
     def news_active(self) -> bool:
         return (self._tick_count - self._last_news_tick) <= self.NEWS_WINDOW_TICKS
 
+    async def seed_context(self, n: int = 400, timeout: float = 5.0) -> int:
+        """Fill the context from the engine's closed bars (FETCH_BARS).
+
+        For a worker that starts, or restarts, after the engine is already running.
+        Best effort: on any failure the context just starts empty and fills from
+        live ticks, and nothing is ever delayed for it. Returns the bars loaded.
+        """
+        try:
+            reply = await asyncio.wait_for(
+                self.client.control({"msg": "FETCH_BARS", "n": n}), timeout)
+            if isinstance(reply, dict) and reply.get("status") == "BARS":
+                return self.context.seed(reply.get("bars") or [], reply.get("run_id"))
+        except Exception as exc:
+            logger.info("context seed skipped (%r); starting empty", exc)
+        return 0
+
     async def run(self) -> None:
         self.running = True
+        if seeded := await self.seed_context():
+            logger.info("Market context seeded with %d bars.", seeded)
         logger.info("Orchestrator online: %d agents, push-driven.", len(self.agents))
         
         async for topic, payload in self.client.iter_messages():
@@ -43,6 +68,8 @@ class SwarmOrchestrator:
                 self._on_event(payload)
 
     async def _on_tick(self, tick: dict) -> None:
+        # Ignores paused/repeated ticks itself, so it is safe to call every time.
+        self.context.update(tick)
         if tick.get("paused"):
             # The market is closed: acting would only burn RNG draws and move
             # cooldowns by however many paused seconds happened to pass.

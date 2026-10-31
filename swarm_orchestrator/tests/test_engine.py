@@ -188,3 +188,11 @@ def test_ping():
     e = make_engine()
     ack, _ = e.handle_message({"msg": "PING"})
     assert ack["status"] == "PONG"
+
+
+def test_leaderboard_lists_every_agent_not_just_top_15():
+    e = MatchingEngine()
+    e.init_sim("TCS", "TECH", 190.0, seed=1)
+    for i in range(40):
+        e._ensure_agent(f"RET_{i}")
+    assert len(e._leaderboard()) == 40

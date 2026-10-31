@@ -22,6 +22,9 @@ from analytics.results import ResultsStore
 from analytics.routes_results import router as results_router
 from analytics.routes_scripts import router as scripts_router
 from features.routes_features import router as features_router
+# Replay CSV upload (POST /api/replay/upload): validates with the engine's own
+# HistoricalReplayer.load_csv() and saves to the volume the engine also reads.
+from features.routes_uploads import router as uploads_router
 from runner.script_store import ScriptStore
 
 load_dotenv()
@@ -216,6 +219,8 @@ class NewsReq(BaseModel):
     headline: str
 
 class ReplayStartReq(BaseModel):
+    # A path the ENGINE can read. For a user's own file, upload it first via
+    # POST /api/replay/upload and pass the ``csv_path`` that call returns.
     csv_path: str
     symbol: Optional[str] = None
     sector: Optional[str] = None
@@ -231,6 +236,14 @@ class StrategyRunReq(BaseModel):
 class StrategyStopReq(BaseModel):
     strategy_id: str
 
+
+class StrategyCheckReq(BaseModel):
+    code: str
+
+
+# --------------------------------------------------------------------------- #
+# WebSocket: /ws                                                               #
+# --------------------------------------------------------------------------- #
 @app.websocket("/ws")
 async def ws_stream(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -282,7 +295,42 @@ async def replay_start(req: ReplayStartReq) -> dict:
         
     if not (ack := await _control_request(msg)):
         raise HTTPException(status_code=502, detail="engine did not acknowledge REPLAY_START")
+    # A bad csv_path or unreadable file comes back as status REJECTED with a
+    # reason; surface it as a 400 instead of a 200 with run_id=None.
+    if ack.get("status") == "REJECTED":
+        raise HTTPException(status_code=400, detail=ack.get("reason") or "replay rejected")
     return {"status": ack.get("status"), "run_id": ack.get("run_id"), "bars": ack.get("bars")}
+
+
+# --------------------------------------------------------------------------- #
+# REST: strategy sandbox                                                       #
+# --------------------------------------------------------------------------- #
+# A dry run starts a throwaway container (about a second each). Two at a time is
+# plenty for a single user and stops many users from starting containers faster
+# than they finish.
+_check_slots = asyncio.Semaphore(2)
+
+
+@app.post("/api/strategy/check")
+async def strategy_check(req: StrategyCheckReq) -> dict:
+    """Check strategy code WITHOUT running it: static analysis plus a dry run.
+
+    Always answers 200 with ``{ok, errors, warnings, orders, backend, dry_run,
+    duration_ms}``; each error is ``{stage, line, message, code?}`` so the UI can
+    point at the exact line. ``ok`` is about the code; ``dry_run`` says whether
+    (and where) it was exercised.
+    """
+    mgr = _require_sandbox()
+    async with _check_slots:
+        return await asyncio.to_thread(mgr.check, req.code)
+
+
+@app.get("/api/strategy/sandbox")
+async def strategy_sandbox() -> dict:
+    """Which sandbox would run a strategy now: runner, docker, unsafe-subprocess or unavailable."""
+    mgr = _require_sandbox()
+    mode = await asyncio.to_thread(mgr.mode)
+    return {"mode": mode, "sealed": mode in ("runner", "docker")}
 
 @app.post("/api/replay/handover")
 async def replay_handover(req: HandoverReq) -> dict:
@@ -297,15 +345,26 @@ async def replay_handover(req: HandoverReq) -> dict:
 
 @app.post("/api/strategy/run")
 async def strategy_run(req: StrategyRunReq) -> dict:
+    """Check, then launch user strategy code in the sealed sandbox.
+
+    400 if the code fails the check (the detail lists each problem with its
+    line); 503 if no sealed sandbox is available.
+    """
     mgr = _require_sandbox()
     try:
         result = await asyncio.to_thread(mgr.launch, req.name, req.code)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-        
-    if _results:
-        _results.attach_strategy(result["strategy_id"], result["agent_id"], req.name, None)
-    return {"strategy_id": result["strategy_id"], "agent_id": result["agent_id"], "backend": result.get("backend")}
+    except RuntimeError as exc:            # SandboxUnavailable: no sealed backend
+        raise HTTPException(status_code=503, detail=str(exc))
+    # Register the direct-run strategy with the session results store (the
+    # library-run path does the same inside analytics.routes_scripts).
+    if _results is not None:
+        _results.attach_strategy(
+            result["strategy_id"], result["agent_id"], req.name, None)
+    return {"strategy_id": result["strategy_id"], "agent_id": result["agent_id"],
+            "backend": result.get("backend")}
+
 
 @app.post("/api/strategy/stop")
 async def strategy_stop(req: StrategyStopReq) -> dict:
@@ -339,6 +398,14 @@ async def health() -> dict:
 app.include_router(scripts_router)
 app.include_router(results_router)
 app.include_router(features_router)
+app.include_router(uploads_router)  # POST /api/replay/upload
+
+
+# --------------------------------------------------------------------------- #
+# Static frontend -- mounted LAST so /api and /ws take precedence.             #
+# check_dir=False lets this module import before the FRONTEND agent's files    #
+# land; the directory is resolved per-request at serve time.                   #
+# --------------------------------------------------------------------------- #
 app.mount("/", StaticFiles(directory="dashboard", html=True, check_dir=False), name="dashboard")
 
 if __name__ == "__main__":

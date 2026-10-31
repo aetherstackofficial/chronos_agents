@@ -83,6 +83,19 @@ def test_scenarios_generate_valid_csvs(tmp_path):
         assert header == "date,time,open,high,low,close,volume"
 
 
+def test_scenario_dir_env_var_is_used(tmp_path, monkeypatch):
+    """CHRONOS_SCENARIO_DIR moves the tapes (Docker: onto the volume the
+    engine also mounts). Without it, Time Machine replays fail in Docker."""
+    import os
+    from features.timemachine import ensure_scenarios, scenario_csv_path
+    target = tmp_path / "shared" / "scenarios"
+    monkeypatch.setenv("CHRONOS_SCENARIO_DIR", str(target))
+    ensure_scenarios()                          # no data_dir -> env var
+    path = scenario_csv_path("covid_crash_2020")
+    assert os.path.dirname(path) == str(target)
+    assert os.path.exists(path)
+
+
 def _accepts_dir():
     import inspect
     from features.timemachine import scenario_csv_path

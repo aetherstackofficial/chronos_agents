@@ -15,6 +15,8 @@ gymnasium>=0.29
 # Web bridge (ASGI, async-native WebSockets)
 fastapi>=0.111
 uvicorn[standard]>=0.30
+# Multipart form parsing -- FastAPI needs it for UploadFile (POST /api/replay/upload)
+python-multipart>=0.0.9
 
 # LLM macro oracle (tier 1 Gemini SDK; tier 2 Groq is a plain HTTP call on
 # httpx, which is listed below and is a RUNTIME dependency of oracle.py)

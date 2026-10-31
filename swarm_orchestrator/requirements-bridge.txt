@@ -1,0 +1,11 @@
+# Extra packages only the bridge needs, on top of requirements.txt.
+#
+# Kept in a separate file so Dockerfile.bridge can install them in their own
+# layer: adding a package here rebuilds only this small layer instead of
+# re-downloading torch and everything else in requirements.txt.
+#
+# Local (non-Docker) setup: pip install -r requirements.txt -r requirements-bridge.txt
+
+# Yahoo Finance downloads for replay (POST /api/replay/yahoo, features/yahoo.py).
+# Unofficial API: limits change without notice; every download is saved as a CSV.
+yfinance>=0.2.50

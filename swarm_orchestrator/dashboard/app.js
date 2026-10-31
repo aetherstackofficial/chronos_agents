@@ -15,20 +15,22 @@ import market from './views/market.js';
 import strategies from './views/strategies.js';
 import results from './views/results.js';
 import timemachine from './views/timemachine.js';
+import replaydata from './views/replaydata.js';   // pick a Yahoo stock / upload a CSV to replay
 import runs from './views/runs.js';
 import lab from './views/lab.js';
 
 const ctx = { store, api, fmt, ui, charts, splitter };
 
 /** Fixed nav order (DESIGN.md). Group fallback if a view omits its own. */
-const VIEWS = [market, strategies, results, timemachine,lab, runs];
+// replaydata sits right under Market so it is easy to find.
+const VIEWS = [market, replaydata, strategies, results, timemachine,lab, runs];
 const GROUP_FALLBACK = {
-  market: '', strategies: 'Trading', results: 'Trading',
+  market: '', replaydata: 'Replay', strategies: 'Trading', results: 'Trading',
   timemachine: 'Lab', lab: 'Lab',
   runs: 'Data',
 };
 const ICON_FALLBACK = {
-  market: 'candles', strategies: 'code', results: 'report',
+  market: 'candles', replaydata: 'upload', strategies: 'code', results: 'report',
   timemachine: 'clock', lab: 'flask', runs: 'database',
 };
 /** Views whose data pops out to a standalone page via the topbar ⤢. */

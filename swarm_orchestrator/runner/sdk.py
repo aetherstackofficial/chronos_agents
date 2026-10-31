@@ -13,8 +13,9 @@ the strategy to the engine over ZeroMQ:
 
 The SDK is deliberately **synchronous** (plain pyzmq, no asyncio): the simplest
 possible user runtime.  It is a *standalone thin client* — it never imports from
-``core/``, ``engine/`` or ``agents/`` and only needs ``pyzmq`` (plus, optionally,
-``python-dotenv``) at runtime.
+``engine/`` or ``agents/``; the only project file it uses is the pure-Python
+``core/market_context.py`` (shipped into the sandbox image), and it needs ``pyzmq``
+(plus, optionally, ``python-dotenv``) at runtime.
 
 Agent identity
 --------------
@@ -45,6 +46,8 @@ from types import FrameType
 from typing import Any, Optional, Type
 
 import zmq
+
+from core.market_context import MarketContext
 
 try:  # optional convenience — present in the full stack, not required for the SDK
     from dotenv import load_dotenv
@@ -94,7 +97,15 @@ class Strategy:
       ``ack`` is the section 4.2 payload (``ack["pos"]``/``ack["cash"]`` are the
       authoritative post-trade ledger).
     * ``on_stop()``        — once, on shutdown (after CANCEL_ALL was sent).
+
+    ``self.context`` is a :class:`~core.market_context.MarketContext`: yesterday's
+    range, today's high/low, swing points and returns, built from the same ticks
+    and updated just before each ``on_tick``. It only reports what has happened;
+    check ``self.context.ready`` before relying on it. It is None until the
+    runner attaches it (so guard with ``if self.context``).
     """
+
+    context: Optional[MarketContext] = None
 
     def on_start(self, config: dict) -> None:
         """Called once before the tick loop starts."""
@@ -123,47 +134,43 @@ def _round_to_tick(price: float, tick: float = DEFAULT_TICK_SIZE) -> float:
     return round(round(price / tick) * tick, dp)
 
 
-def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
-    """Normalise and validate one user-returned order.
+def check_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> tuple[Optional[dict], Optional[str]]:
+    """Validate one user-returned order and say WHY if it is invalid.
 
-    Returns the cleaned order dict (still without ``msg``/``agent_id``) or
-    ``None`` if the order is invalid.  Invalid orders are logged and dropped —
-    a bad order must never crash the strategy loop.
+    Returns ``(clean_order, None)`` when valid (the order is still without
+    ``msg``/``agent_id``) or ``(None, reason)`` when not. This is the single
+    source of truth for the order rules: the live loop uses it through
+    :func:`validate_order`, and the pre-run dry run (runner/dryrun.py) uses it
+    directly to show the user the reason instead of a silent drop.
     """
     if not isinstance(raw, dict):
-        log.warning("Dropping order: expected dict, got %r", type(raw).__name__)
-        return None
+        return None, f"expected a dict, got {type(raw).__name__}"
 
     action = raw.get("action")
     if action not in VALID_ACTIONS:
-        log.warning("Dropping order: invalid action %r (need BUY/SELL)", action)
-        return None
+        return None, f"invalid action {action!r} (need BUY/SELL)"
 
     # Shorthand {"action","qty"} means a MARKET order.
     order_type = raw.get("type", "MARKET")
     if order_type not in VALID_TYPES:
-        log.warning("Dropping order: invalid type %r (need MARKET/LIMIT)", order_type)
-        return None
+        return None, f"invalid type {order_type!r} (need MARKET/LIMIT)"
 
     qty = raw.get("qty")
     if isinstance(qty, bool) or not isinstance(qty, int) or qty <= 0:
-        log.warning("Dropping order: qty must be int > 0, got %r", qty)
-        return None
+        return None, f"qty must be an int > 0, got {qty!r}"
 
     order: dict = {"action": action, "type": order_type, "qty": qty}
 
     if order_type == "LIMIT":
         price = raw.get("price")
         if not isinstance(price, (int, float)) or isinstance(price, bool) or price <= 0:
-            log.warning("Dropping LIMIT order: price must be float > 0, got %r", price)
-            return None
+            return None, f"a LIMIT order needs a price > 0, got {price!r}"
         order["price"] = _round_to_tick(float(price), tick)
 
     tif = raw.get("tif_ticks")
     if tif is not None:
         if isinstance(tif, bool) or not isinstance(tif, int) or tif < 0:
-            log.warning("Dropping order: tif_ticks must be int >= 0, got %r", tif)
-            return None
+            return None, f"tif_ticks must be an int >= 0, got {tif!r}"
         order["tif_ticks"] = tif
 
     client_order_id = raw.get("client_order_id")
@@ -174,6 +181,20 @@ def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
     if isinstance(meta, dict):
         order["meta"] = meta
 
+    return order, None
+
+
+def validate_order(raw: Any, tick: float = DEFAULT_TICK_SIZE) -> Optional[dict]:
+    """Normalise and validate one user-returned order.
+
+    Returns the cleaned order dict (still without ``msg``/``agent_id``) or
+    ``None`` if the order is invalid.  Invalid orders are logged and dropped —
+    a bad order must never crash the strategy loop. See :func:`check_order`
+    for the rules and the reason text.
+    """
+    order, reason = check_order(raw, tick)
+    if order is None:
+        log.warning("Dropping order: %s", reason)
     return order
 
 
@@ -193,6 +214,8 @@ class _StrategyRunner:
         data_port: int,
     ) -> None:
         self.strategy = strategy
+        self.context = MarketContext()
+        strategy.context = self.context
         self.name = name
         self.agent_id = agent_id
         self.host = host
@@ -252,6 +275,25 @@ class _StrategyRunner:
         log.warning("No ack within %.0fs for order %s", ACK_TIMEOUT_S, client_order_id)
         return None
 
+    def _seed_context(self, n: int = 400, timeout_s: float = 2.0) -> int:
+        """Fill ``self.context`` from the engine's closed bars (FETCH_BARS).
+
+        For a strategy that starts after the engine has been running. Best effort
+        and bounded by ``timeout_s``: on any failure the context starts empty.
+        """
+        try:
+            self.dealer.send_json({"msg": "FETCH_BARS", "n": n, "agent_id": self.agent_id})
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                if not self.dealer.poll(max(1, int((deadline - time.monotonic()) * 1000)), zmq.POLLIN):
+                    break
+                reply = json.loads(self.dealer.recv_multipart()[-1])
+                if reply.get("status") == "BARS":
+                    return self.context.seed(reply.get("bars") or [], reply.get("run_id"))
+        except Exception as exc:       # noqa: BLE001 - never stop a strategy over history
+            log.info("context seed skipped (%r); starting empty", exc)
+        return 0
+
     def _cancel_all(self) -> None:
         """Best-effort CANCEL_ALL on shutdown (pulls our resting quotes)."""
         try:
@@ -268,6 +310,10 @@ class _StrategyRunner:
         # The engine re-derives its tick at each session open, so track it here
         # rather than assuming a fixed grid.
         self._tick_size = float(state.get("tick_size") or DEFAULT_TICK_SIZE)
+        try:
+            self.context.update(state)       # before on_tick, so it is current
+        except Exception:
+            log.exception("market context update failed — ignored")
         try:
             raw_orders = self.strategy.on_tick(state)
         except Exception:
@@ -313,6 +359,8 @@ class _StrategyRunner:
             "order_port": self.order_port,
             "data_port": self.data_port,
         }
+        if seeded := self._seed_context():
+            log.info("Market context seeded with %d bars", seeded)
         try:
             self.strategy.on_start(config)
         except Exception:
