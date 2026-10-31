@@ -65,6 +65,8 @@ def on_tick(self, state):
 | `ret(minutes)` | return over the last `minutes` bars, `None` if there are not enough |
 | `vol_ratio()` | today's realised volatility vs the recent daily norm, `None` if unknown |
 
+If you start your strategy after the market is already running, the SDK first asks the engine for the last 400 closed bars, so `ready` can be True from the first tick (if that fails, the context just starts empty and fills as ticks arrive).
+
 In a replay, one bar is one tick (a 15-minute file gives one 15-minute bar per tick), and the "day" changes every 375 ticks.
 
 ## Returning orders

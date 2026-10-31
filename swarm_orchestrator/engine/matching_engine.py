@@ -38,6 +38,7 @@ class MatchingEngine:
     # -- policy constants (§8, all named per quality bar) ---------------- #
     DEFAULT_TIF_TICKS = 60                    # §8.8 default resting TTL
     TRADES_KEPT = 50                          # FETCH_STATE compat window
+    CLOSED_BARS_KEPT = 1000                   # FETCH_BARS history (late joiners, PROTOCOL §4)
     DEPTH_LEVELS = 10
     RSI_PERIOD = 14
     VOLUME_MA_WINDOW = 20
@@ -111,6 +112,9 @@ class MatchingEngine:
         self.current_bar = self._new_bar()
         self._last_bar: Optional[dict] = None
         self._closes: Deque[float] = deque(maxlen=64)
+        # Every closed bar with its day, so a late-starting worker or strategy can
+        # rebuild its MarketContext (FETCH_BARS). Bounded; reset with the run.
+        self._closed_bars: Deque[dict] = deque(maxlen=self.CLOSED_BARS_KEPT)
         self._vol_window: Deque[int] = deque(maxlen=self.VOLUME_MA_WINDOW)
         self._min_buy_vol = 0
         self._min_sell_vol = 0
@@ -302,6 +306,18 @@ class MatchingEngine:
         logger.info("LATCH: mode=REACTIVE trigger=%s regime=%s",
                     trigger_agent, self.regime)
 
+    def _handle_fetch_bars(self, msg: dict) -> dict:
+        """The last ``n`` closed bars, oldest first (read-only; fine while paused).
+
+        Lets a worker or strategy that starts mid-run seed its MarketContext.
+        """
+        n = msg.get("n", 375)
+        if isinstance(n, bool) or not isinstance(n, int) or not 1 <= n <= self.CLOSED_BARS_KEPT:
+            return self._reject(f"n must be an integer 1-{self.CLOSED_BARS_KEPT}")
+        bars = list(self._closed_bars)[-n:]
+        return {"msg": "ACK", "status": "BARS", "run_id": self.run_id,
+                "n": len(bars), "bars": bars}
+
     def _anchor_clock_to_replay(self, trigger_agent: str) -> None:
         """Continue the clock from the file's own time after the hand-over.
 
@@ -446,6 +462,8 @@ class MatchingEngine:
             payload["status"] = "STATE"
             payload["trades"] = list(self.trades)
             return payload, pubs
+        if mtype == "FETCH_BARS":
+            return self._handle_fetch_bars(msg), pubs
         if mtype == "PING":
             return {"msg": "ACK", "status": "PONG",
                     "seq": self._next_seq()}, pubs
@@ -797,6 +815,9 @@ class MatchingEngine:
         bar = self.current_bar
         bar["minute"] = self.market_minute
         self._closes.append(bar["c"])
+        self._closed_bars.append({"day_count": self.day_count, "minute": bar["minute"],
+                                  "o": bar["o"], "h": bar["h"], "l": bar["l"],
+                                  "c": bar["c"], "v": bar["v"]})
         self._rsi_on_close(bar["c"])
         self._vol_window.append(bar["v"])
         self._last_min_buy = self._min_buy_vol

@@ -110,6 +110,33 @@ class MarketContext:
             return False
         if not all(math.isfinite(x) for x in (o, h, l, c, v)):
             return False
+        return self._add(day, minute, o, h, l, c, v)
+
+    def seed(self, bars: List[dict], run_id: Optional[str] = None) -> int:
+        """Rebuild the history from closed bars (oldest first); return how many were added.
+
+        For a worker or strategy that starts after the engine is already running
+        (engine message FETCH_BARS). Each bar is ``{day_count, minute, o, h, l, c, v}``.
+        Replaces whatever was seen before. Pass the engine's ``run_id`` so the next
+        live ticks of that run continue this history instead of restarting it; a bar
+        that the first live tick repeats is ignored, never counted twice.
+        """
+        self.reset()
+        self._run_id = run_id
+        added = 0
+        for b in bars or []:
+            try:
+                o, h, l, c = (float(b[k]) for k in _REQUIRED)
+                v = float(b.get("v") or 0)
+                minute, day = int(b["minute"]), int(b["day_count"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if all(math.isfinite(x) for x in (o, h, l, c, v)) and self._add(day, minute, o, h, l, c, v):
+                added += 1
+        return added
+
+    def _add(self, day: int, minute: int, o: float, h: float, l: float,
+             c: float, v: float) -> bool:
         key = (day, minute)
         if key == self._last_key:
             return False

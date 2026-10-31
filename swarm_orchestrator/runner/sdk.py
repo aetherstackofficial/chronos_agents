@@ -275,6 +275,25 @@ class _StrategyRunner:
         log.warning("No ack within %.0fs for order %s", ACK_TIMEOUT_S, client_order_id)
         return None
 
+    def _seed_context(self, n: int = 400, timeout_s: float = 2.0) -> int:
+        """Fill ``self.context`` from the engine's closed bars (FETCH_BARS).
+
+        For a strategy that starts after the engine has been running. Best effort
+        and bounded by ``timeout_s``: on any failure the context starts empty.
+        """
+        try:
+            self.dealer.send_json({"msg": "FETCH_BARS", "n": n, "agent_id": self.agent_id})
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                if not self.dealer.poll(max(1, int((deadline - time.monotonic()) * 1000)), zmq.POLLIN):
+                    break
+                reply = json.loads(self.dealer.recv_multipart()[-1])
+                if reply.get("status") == "BARS":
+                    return self.context.seed(reply.get("bars") or [], reply.get("run_id"))
+        except Exception as exc:       # noqa: BLE001 - never stop a strategy over history
+            log.info("context seed skipped (%r); starting empty", exc)
+        return 0
+
     def _cancel_all(self) -> None:
         """Best-effort CANCEL_ALL on shutdown (pulls our resting quotes)."""
         try:
@@ -340,6 +359,8 @@ class _StrategyRunner:
             "order_port": self.order_port,
             "data_port": self.data_port,
         }
+        if seeded := self._seed_context():
+            log.info("Market context seeded with %d bars", seeded)
         try:
             self.strategy.on_start(config)
         except Exception:

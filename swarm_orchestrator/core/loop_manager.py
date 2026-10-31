@@ -37,8 +37,26 @@ class SwarmOrchestrator:
     def news_active(self) -> bool:
         return (self._tick_count - self._last_news_tick) <= self.NEWS_WINDOW_TICKS
 
+    async def seed_context(self, n: int = 400, timeout: float = 5.0) -> int:
+        """Fill the context from the engine's closed bars (FETCH_BARS).
+
+        For a worker that starts, or restarts, after the engine is already running.
+        Best effort: on any failure the context just starts empty and fills from
+        live ticks, and nothing is ever delayed for it. Returns the bars loaded.
+        """
+        try:
+            reply = await asyncio.wait_for(
+                self.client.control({"msg": "FETCH_BARS", "n": n}), timeout)
+            if isinstance(reply, dict) and reply.get("status") == "BARS":
+                return self.context.seed(reply.get("bars") or [], reply.get("run_id"))
+        except Exception as exc:
+            logger.info("context seed skipped (%r); starting empty", exc)
+        return 0
+
     async def run(self) -> None:
         self.running = True
+        if seeded := await self.seed_context():
+            logger.info("Market context seeded with %d bars.", seeded)
         logger.info("Orchestrator online: %d agents, push-driven.", len(self.agents))
         
         async for topic, payload in self.client.iter_messages():

@@ -155,6 +155,10 @@ strict **price–time priority**. Self-trades are prevented (an order never matc
 
 { "msg": "PAUSE" }  |  { "msg": "RESUME" }  → ACK status "PAUSED" | "RUNNING"
 { "msg": "FETCH_STATE" }                    → the current tick payload (§5.1) — poll fallback
+{ "msg": "FETCH_BARS", "n": 400 }           → { "msg": "ACK", "status": "BARS", "run_id": "...", "n": 400,
+                                                 "bars": [{"day_count", "minute", "o", "h", "l", "c", "v"}, ...] }
+   // the last n closed bars, oldest first (n = 1-1000, default 375; REJECTED otherwise). Read-only, works while
+   // paused. Late joiners use it to rebuild core/market_context.py (MarketContext.seed). The engine keeps the last 1000.
 { "msg": "PING" }                           → { "msg": "ACK", "status": "PONG", ... }
 
 // Swarm worker → engine server, after acting on every unpaused tick (lockstep, §2).
