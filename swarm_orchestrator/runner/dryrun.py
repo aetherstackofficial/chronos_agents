@@ -33,6 +33,7 @@ import time
 import traceback
 from typing import Any, List, Optional
 
+from core.market_context import MarketContext
 from runner.check import DRYRUN_SENTINEL as SENTINEL
 from runner.sdk import MAX_ORDERS_PER_TICK, Strategy, check_order
 SLOW_CALL_S = 0.5            # ticks arrive once a second; a hook this slow is a problem
@@ -151,6 +152,8 @@ def run_dry(path: str, ticks: List[dict]) -> dict:
                 warnings.append(item)
             return result
 
+        context = strategy.context = MarketContext()      # as the SDK runner attaches it
+
         call("on_start", strategy.on_start,
              {"agent_id": "STRAT_dryrun", "name": "dry-run", "host": "dry-run",
               "order_port": 0, "data_port": 0})
@@ -159,6 +162,7 @@ def run_dry(path: str, ticks: List[dict]) -> dict:
         first_valid: Optional[dict] = None
         for tick in ticks:
             scenario = tick.get("scenario", "tick")
+            context.update(tick)
             raw = call("on_tick", strategy.on_tick, dict(tick), scenario=scenario)
             if raw is None or raw == []:
                 continue

@@ -40,6 +40,33 @@ Start from `runner/examples/momentum.py` (trend following) or `mean_reversion.py
 | `mode` | `REPLAY` (history sets the price) or `REACTIVE` (the AI agents do) |
 | `tick_size`, `symbol`, `sector`, `regime`, `unix_time`, `day_count`, `market_minute`, `leaderboard` | context |
 
+## Market history: `self.context`
+
+`state` is only the current tick. For what the market has already done, use `self.context`, which the SDK updates just before every `on_tick`. It reports history only; it never forecasts, and nothing waits on it (your orders are never blocked).
+
+```python
+def on_tick(self, state):
+    ctx = self.context
+    if not (ctx and ctx.ready):            # needs ~120 bars; until then, trade as normal
+        return []
+    prev = ctx.prev_day                    # None on the first day
+    if prev and state["last_price"] > prev["h"]:
+        return [{"action": "BUY", "qty": 10}]   # broke yesterday's high
+    return []
+```
+
+| Member | Meaning |
+|---|---|
+| `ready`, `bars_seen` | `ready` is True once 120 bars have been seen |
+| `day_open`, `day_high`, `day_low`, `day_close` | today so far (`None` before the first bar) |
+| `prev_day` | yesterday as `{o, h, l, c, v}`, or `None` on the first day |
+| `days` | the last 5 completed days, newest last (today not included) |
+| `swing_highs()`, `swing_lows()` | confirmed pivot prices, newest last. A bar is a pivot if it beats the 5 bars before and the 5 bars after it, so it shows up 5 bars late (it never uses the future) |
+| `ret(minutes)` | return over the last `minutes` bars, `None` if there are not enough |
+| `vol_ratio()` | today's realised volatility vs the recent daily norm, `None` if unknown |
+
+In a replay, one bar is one tick (a 15-minute file gives one 15-minute bar per tick), and the "day" changes every 375 ticks.
+
 ## Returning orders
 
 - Each order is a dict. `{"action": "BUY", "qty": 25}` is a **market** order. Add `"type": "LIMIT"` and a `"price"` for a limit order.

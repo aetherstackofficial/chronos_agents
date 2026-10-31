@@ -13,8 +13,9 @@ the strategy to the engine over ZeroMQ:
 
 The SDK is deliberately **synchronous** (plain pyzmq, no asyncio): the simplest
 possible user runtime.  It is a *standalone thin client* — it never imports from
-``core/``, ``engine/`` or ``agents/`` and only needs ``pyzmq`` (plus, optionally,
-``python-dotenv``) at runtime.
+``engine/`` or ``agents/``; the only project file it uses is the pure-Python
+``core/market_context.py`` (shipped into the sandbox image), and it needs ``pyzmq``
+(plus, optionally, ``python-dotenv``) at runtime.
 
 Agent identity
 --------------
@@ -45,6 +46,8 @@ from types import FrameType
 from typing import Any, Optional, Type
 
 import zmq
+
+from core.market_context import MarketContext
 
 try:  # optional convenience — present in the full stack, not required for the SDK
     from dotenv import load_dotenv
@@ -94,7 +97,15 @@ class Strategy:
       ``ack`` is the section 4.2 payload (``ack["pos"]``/``ack["cash"]`` are the
       authoritative post-trade ledger).
     * ``on_stop()``        — once, on shutdown (after CANCEL_ALL was sent).
+
+    ``self.context`` is a :class:`~core.market_context.MarketContext`: yesterday's
+    range, today's high/low, swing points and returns, built from the same ticks
+    and updated just before each ``on_tick``. It only reports what has happened;
+    check ``self.context.ready`` before relying on it. It is None until the
+    runner attaches it (so guard with ``if self.context``).
     """
+
+    context: Optional[MarketContext] = None
 
     def on_start(self, config: dict) -> None:
         """Called once before the tick loop starts."""
@@ -203,6 +214,8 @@ class _StrategyRunner:
         data_port: int,
     ) -> None:
         self.strategy = strategy
+        self.context = MarketContext()
+        strategy.context = self.context
         self.name = name
         self.agent_id = agent_id
         self.host = host
@@ -278,6 +291,10 @@ class _StrategyRunner:
         # The engine re-derives its tick at each session open, so track it here
         # rather than assuming a fixed grid.
         self._tick_size = float(state.get("tick_size") or DEFAULT_TICK_SIZE)
+        try:
+            self.context.update(state)       # before on_tick, so it is current
+        except Exception:
+            log.exception("market context update failed — ignored")
         try:
             raw_orders = self.strategy.on_tick(state)
         except Exception:

@@ -4,6 +4,7 @@ import random
 from typing import Iterable, List
 
 from core.engine_client import EngineClient
+from core.market_context import MarketContext
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +21,17 @@ class SwarmOrchestrator:
         # agents.swarm_factory.TickClock shared with the agents; set from each
         # tick before any agent acts.
         self.clock = clock
+        # One shared market-history object (core/market_context.py). Fed once per
+        # tick below, before any agent acts; agents read it as ``agent.context``.
+        # It only reports what happened and never gates an agent.
+        self.context = MarketContext()
         self._tick_count = 0
         self._last_news_tick = -self.NEWS_WINDOW_TICKS
 
     def load_agents(self, agents_list: Iterable) -> None:
         self.agents = list(agents_list)
+        for agent in self.agents:
+            agent.context = self.context
 
     @property
     def news_active(self) -> bool:
@@ -43,6 +50,8 @@ class SwarmOrchestrator:
                 self._on_event(payload)
 
     async def _on_tick(self, tick: dict) -> None:
+        # Ignores paused/repeated ticks itself, so it is safe to call every time.
+        self.context.update(tick)
         if tick.get("paused"):
             # The market is closed: acting would only burn RNG draws and move
             # cooldowns by however many paused seconds happened to pass.
