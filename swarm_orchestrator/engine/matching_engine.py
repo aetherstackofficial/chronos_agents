@@ -433,18 +433,6 @@ class MatchingEngine:
         if self.paused and mtype in ("ORDER", "CANCEL", "CANCEL_ALL"):
             return self._reject("market is paused"), pubs
 
-        # While history is replaying it sets the price, so nobody may trade except a
-        # user strategy (STRAT_/USER_), whose first fill triggers the hand-over. Swarm
-        # agents, the red team and the news oracle are refused. The engine's own
-        # SIM_LP / ghost orders do not come through here (submit_flow_order), so the
-        # replay itself is unaffected. Rejected before any account is created.
-        if self.mode == "REPLAY" and mtype == "ORDER":
-            agent_id = msg.get("agent_id")
-            if not (isinstance(agent_id, str) and agent_id.startswith(("STRAT_", "USER_"))):
-                return self._reject(
-                    "replay in progress: only strategies can trade until the hand-over",
-                    msg.get("client_order_id")), pubs
-
         if mtype == "ORDER":
             return self._handle_order(msg, pubs)
         if mtype == "CANCEL":

@@ -1,15 +1,15 @@
 """Yahoo Finance bar downloads for replay (via the unofficial ``yfinance`` lib).
 
-Fetches 15-minute OHLCV bars and turns them into rows in the replay CSV format
+Fetches 1m or 15m OHLCV bars and turns them into rows in the replay CSV format
 (``date,time,open,high,low,close,volume``). The caller saves every download to
 disk and replays from that file -- Yahoo is never in the replay path, so a run
 can be repeated even after Yahoo blocks us or the data ages out of its window.
 
 Yahoo's limits (checked live, Oct 2026 -- they change without notice):
 
-* ``15m`` -- only the last ~60 days, in one request. This is the only interval
-  offered: 1-minute Yahoo data (last ~30 days, 8 days per request) was removed
-  from the product on purpose. Your own CSV can still hold 1-minute bars.
+* ``1m``  -- only the last ~30 days, and at most ~8 days per request. We ask for
+  7-day windows and stitch them together, so up to 29 days works.
+* ``15m`` -- only the last ~60 days, in one request.
 * Indian stocks need an exchange suffix: ``RELIANCE.NS`` (NSE) or
   ``RELIANCE.BO`` (BSE). Plain ``RELIANCE`` returns nothing.
 
@@ -37,10 +37,11 @@ log = logging.getLogger("chronos.yahoo")
 # Per-interval limits. Kept one day inside Yahoo's real edges: a request that
 # starts exactly 30 days back is rejected as "not within the last 30 days".
 INTERVAL_LIMITS: Dict[str, dict] = {
+    "1m":  {"max_days": 29, "days_per_request": 7},
     "15m": {"max_days": 59, "days_per_request": 59},
 }
-# Pause between chunks if a range is ever split into several requests, to stay
-# gentle with an unofficial API that throttles heavy use (a 15m download is one request).
+# Pause between the 7-day chunks of a long 1m download, to stay gentle with an
+# unofficial API that throttles heavy use.
 CHUNK_PAUSE_S = 0.5
 
 # Letters, digits and the punctuation real tickers use: RELIANCE.NS, ^NSEI,
@@ -71,7 +72,7 @@ def validate_request(symbol: str, interval: str, days: int) -> str:
     if not _SYMBOL_RE.match(symbol):
         raise YahooError(400, f"invalid symbol {symbol!r}; example: RELIANCE.NS")
     if interval not in INTERVAL_LIMITS:
-        raise YahooError(400, f"only 15-minute bars are supported (interval '15m'); got {interval!r}")
+        raise YahooError(400, f"interval must be one of {sorted(INTERVAL_LIMITS)}")
     max_days = INTERVAL_LIMITS[interval]["max_days"]
     if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= max_days:
         raise YahooError(
