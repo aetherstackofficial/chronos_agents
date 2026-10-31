@@ -1,0 +1,5 @@
+# Extra dependencies of the realism validation suite only (not the live app).
+# statsmodels 0.14.4 breaks on pandas 3.x; 0.14.6 is the first that works.
+scipy==1.14.1
+statsmodels==0.14.6
+pyyaml>=6.0

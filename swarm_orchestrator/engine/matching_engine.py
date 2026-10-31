@@ -14,7 +14,7 @@ import logging
 import math
 import random
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Deque, Dict, List, Optional, Tuple
 
 from .book import OrderBook, round_to_tick, tick_for_price, decimals_for_tick
@@ -31,9 +31,9 @@ class MatchingEngine:
 
     # -- venue constants (PROTOCOL §3) ---------------------------------- #
     SESSION_MINUTES = 375
-    SIM_EPOCH = 1767258900                    # 2026-01-01 09:15 IST-as-UTC
-    OVERNIGHT_SECONDS = int(17.5 * 3600)
+    SIM_EPOCH = 1767258900                    # 2026-01-01 09:15 IST-as-UTC (a Thursday)
     SECONDS_PER_MINUTE = 60
+    SECONDS_PER_DAY = 86_400                  # sessions open 09:15 on weekdays; no holiday calendar
 
     # -- policy constants (§8, all named per quality bar) ---------------- #
     DEFAULT_TIF_TICKS = 60                    # §8.8 default resting TTL
@@ -54,6 +54,12 @@ class MatchingEngine:
     CASH_INSTITUTION = 5_000_000.0
     CASH_MARKET_MAKER = 250_000.0
     CASH_RETAIL = 50_000.0
+    # A retail agent may ask for its own starting cash (optional ``start_cash``
+    # on its first message); anything outside this band falls back to
+    # CASH_RETAIL. Retail only: institutions, market makers and strategies
+    # keep their fixed ledgers.
+    RETAIL_CASH_MIN = 10_000.0
+    RETAIL_CASH_MAX = 1e9
     CASH_STRATEGY = 1_000_000.0
     CASH_ORACLE = 1e9
     CASH_INTERNAL = 1e12                      # SIM_LP / GHOST flow agents
@@ -92,6 +98,7 @@ class MatchingEngine:
         self.tick_count = 0
         self.market_minute = 0
         self.day_count = 1
+        self.session_open_unix = self.SIM_EPOCH    # 09:15 of the current session
         self.sim_unix_time = self.SIM_EPOCH
         # "RANGING" until the replay latch (if any) honestly infers a label
         # from real close drift (§9) — nothing randomly drives this anymore.
@@ -117,6 +124,9 @@ class MatchingEngine:
         self._rsi_avg_loss: Optional[float] = None
         self._rsi_seed: List[Tuple[float, float]] = []
         self.replayer = None
+        # HANDOVER (§9): switch REPLAY -> REACTIVE once this many tape bars
+        # have been replayed; None = not armed.
+        self._handover_at: Optional[int] = None
 
     def _make_run_id(self) -> str:
         return "run_{}_{:04x}".format(
@@ -190,10 +200,24 @@ class MatchingEngine:
             return "Market Maker", cls.CASH_MARKET_MAKER, False
         return "Retail", cls.CASH_RETAIL, False
 
-    def _ensure_agent(self, agent_id: str) -> dict:
+    def _requested_retail_cash(self, value) -> Optional[float]:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        cash = float(value)
+        if not math.isfinite(cash) \
+                or not self.RETAIL_CASH_MIN <= cash <= self.RETAIL_CASH_MAX:
+            return None
+        return cash
+
+    def _ensure_agent(self, agent_id: str,
+                      start_cash: Optional[float] = None) -> dict:
+        """Ledger for ``agent_id``, created on first sight. ``start_cash`` is
+        honoured only at creation and only for Retail agents."""
         led = self.agent_ledger.get(agent_id)
         if led is None:
             a_type, cash, internal = self._classify_agent(agent_id)
+            if a_type == "Retail":
+                cash = self._requested_retail_cash(start_cash) or cash
             led = {"id": agent_id, "type": a_type, "cash": cash, "pos": 0,
                    "start_cash": cash, "internal": internal}
             self.agent_ledger[agent_id] = led
@@ -222,6 +246,11 @@ class MatchingEngine:
         self.last_price = price  # the ONLY price authority
 
         bar = self.current_bar
+        if not self._bar_traded:
+            # A minute bar opens at its first trade, not at the previous
+            # close (NSE bars gap: 55% of real RELIANCE opens != prior close).
+            bar["o"] = bar["h"] = bar["l"] = price
+            self._bar_traded = True
         bar["h"] = max(bar["h"], price)
         bar["l"] = min(bar["l"], price)
         bar["c"] = price
@@ -250,18 +279,48 @@ class MatchingEngine:
 
     def _latch_reactive(self, trigger_agent: str,
                         pubs: List[Publication]) -> None:
-        """Flip REPLAY -> REACTIVE permanently on the first swarm/user fill.
+        """Flip REPLAY -> REACTIVE permanently: on the first STRAT_/USER_
+        fill, or on an armed HANDOVER (trigger "HANDOVER").
 
-        Book, ledgers and RSI window carry over untouched; the regime is
-        inferred from recent close drift so LIVE physics resumes seamlessly.
+        Book, ledgers, RSI window and the RNG stream carry over untouched (no
+        reseed); the regime is inferred from recent close drift so LIVE
+        physics resumes seamlessly. Both triggers switch at the same point
+        in the tape, so a HANDOVER control run differs from a user-trade run
+        only by the user's own orders.
         """
         self.mode = "REACTIVE"
         self.regime = self._infer_regime()
+        self._handover_at = None
+        self._anchor_clock_to_replay(trigger_agent)
+        replayed = self.replayer.cursor if self.replayer is not None else 0
+        total = len(self.replayer.bars) if self.replayer is not None else 0
         pubs.append(("event", {"seq": self._next_seq(), "kind": "mode_change",
                                "mode": "REACTIVE",
-                               "trigger_agent": trigger_agent}))
+                               "trigger_agent": trigger_agent,
+                               "bars_replayed": replayed,
+                               "bars_remaining": total - replayed}))
         logger.info("LATCH: mode=REACTIVE trigger=%s regime=%s",
                     trigger_agent, self.regime)
+
+    def _anchor_clock_to_replay(self, trigger_agent: str) -> None:
+        """Continue the clock from the file's own time after the hand-over.
+
+        _advance_clock derives time from session_open_unix + market_minute. While
+        replaying, each bar overwrites sim_unix_time with the file's date/time, but
+        the session base is still the engine's own epoch -- so the first live tick
+        would jump back to 1 Jan 2026. Re-base the session on the last replayed bar.
+        """
+        rp = self.replayer
+        if rp is None or rp.cursor < 1:
+            return
+        ts = rp.bars[rp.cursor - 1].get("ts")
+        if ts is None:
+            return
+        if trigger_agent == "HANDOVER":
+            # Armed at the start of a tick, before that bar's clock was set: this
+            # tick is the first live minute after the last replayed bar.
+            self.sim_unix_time = ts + self.SECONDS_PER_MINUTE
+        self.session_open_unix = self.sim_unix_time - self.SECONDS_PER_MINUTE * self.market_minute
 
     def _infer_regime(self) -> str:
         closes = list(self._closes)
@@ -344,7 +403,8 @@ class MatchingEngine:
         return cancelled
 
     def _check_liquidations(self, agent_ids, pubs: List[Publication]) -> None:
-        """Retail bankruptcy reset (§8.6): equity < threshold -> fresh 50k."""
+        """Retail bankruptcy reset (§8.6): equity < threshold -> the agent's
+        own starting cash (50k unless it asked for another amount)."""
         for aid in agent_ids:
             led = self.agent_ledger.get(aid)
             if led is None or led["type"] != "Retail":
@@ -352,7 +412,7 @@ class MatchingEngine:
             equity = led["cash"] + led["pos"] * self.last_price
             if equity < self.LIQUIDATION_THRESHOLD:
                 self.flush_agent_orders(aid)
-                led["cash"] = self.CASH_RETAIL
+                led["cash"] = led["start_cash"]
                 led["pos"] = 0
                 pubs.append(("event", {"seq": self._next_seq(),
                                        "kind": "liquidation",
@@ -419,6 +479,8 @@ class MatchingEngine:
             return self._handle_init_sim(msg), pubs
         if mtype == "REPLAY_START":
             return self._handle_replay_start(msg), pubs
+        if mtype == "HANDOVER":
+            return self._handle_handover(msg), pubs
         return self._reject(f"unknown msg type: {mtype!r}"), pubs
 
     def _reject(self, reason: str,
@@ -485,6 +547,7 @@ class MatchingEngine:
                 "reasoning": news.get("reasoning", ""),
                 "source": news.get("source", "fallback")}))
 
+        self._ensure_agent(agent_id, msg.get("start_cash"))
         ack = self._submit_order(agent_id, action, order_type, qty, price,
                                  tif, pubs, client_order_id)
         return ack, pubs
@@ -515,7 +578,7 @@ class MatchingEngine:
         if not isinstance(agent_id, str) or not agent_id:
             return self._reject("missing agent_id")
         count = self.flush_agent_orders(agent_id)
-        led = self._ensure_agent(agent_id)
+        led = self._ensure_agent(agent_id, msg.get("start_cash"))
         return {"msg": "ACK", "status": "CANCELLED", "order_id": 0,
                 "executed_qty": 0, "average_price": 0.0, "resting_qty": 0,
                 "cancelled": count, "cash": round(led["cash"], 2),
@@ -549,6 +612,32 @@ class MatchingEngine:
         return {"msg": "ACK", "status": "REPLAY_READY", "run_id": run_id,
                 "bars": n_bars, "seq": self._next_seq()}
 
+    def _handle_handover(self, msg: dict) -> dict:
+        """Arm the deterministic REPLAY -> REACTIVE hand-over (§9).
+
+        ``at_bar`` = number of tape bars to replay first (default: the bars
+        replayed so far). The switch happens at the start of the physics
+        tick that would replay bar ``at_bar + 1`` -- the same point at which
+        a user trade placed after bar ``at_bar`` latches -- with no trade
+        needed. A later HANDOVER replaces an armed one.
+        """
+        if self.mode != "REPLAY" or self.replayer is None:
+            return self._reject(f"HANDOVER needs REPLAY mode (mode is {self.mode})")
+        at_bar = msg.get("at_bar", self.replayer.cursor)
+        if not isinstance(at_bar, int) or isinstance(at_bar, bool):
+            return self._reject("at_bar must be an int")
+        if at_bar < self.replayer.cursor:
+            return self._reject(f"at_bar {at_bar} already replayed "
+                                f"({self.replayer.cursor} bars done)")
+        if at_bar > len(self.replayer.bars):
+            return self._reject(f"at_bar {at_bar} beyond the tape "
+                                f"({len(self.replayer.bars)} bars)")
+        self._handover_at = at_bar
+        logger.info("HANDOVER armed at bar %d (%d replayed)", at_bar,
+                    self.replayer.cursor)
+        return {"msg": "ACK", "status": "HANDOVER_ARMED", "at_bar": at_bar,
+                "bars_replayed": self.replayer.cursor, "seq": self._next_seq()}
+
     # ------------------------------------------------------------------ #
     # physics tick (PROTOCOL §12.1)
     # ------------------------------------------------------------------ #
@@ -570,6 +659,13 @@ class MatchingEngine:
         pubs: List[Publication] = []
         self.tick_count += 1
         self._advance_clock(pubs)
+
+        if (self.mode == "REPLAY" and self._handover_at is not None
+                and self.replayer is not None
+                and self.replayer.cursor >= self._handover_at):
+            # Armed HANDOVER: this tick would replay bar at_bar + 1 -- the
+            # swarm owns the price from here, exactly as after a user latch.
+            self._latch_reactive("HANDOVER", pubs)
 
         was_replay = self.mode == "REPLAY"
         if was_replay and self.replayer is not None:
@@ -597,23 +693,40 @@ class MatchingEngine:
                                    "action": "day_close",
                                    "day_count": self.day_count}))
             self._expire_day_orders()
-            self._review_tick_size()
+            prev_open = self.session_open_unix
+            self.session_open_unix = self._next_session_open(prev_open)
+            # NSE reviews the tick band monthly: the previous month's last
+            # close (= last_price here) sets the tick from the month's first
+            # session. Observed on real HDFCBANK/SBIN band crossings, 2025-26.
+            if self._calendar_month(self.session_open_unix) != self._calendar_month(prev_open):
+                self._review_tick_size()
             self.day_count += 1
             self.market_minute = 1
-            self.sim_unix_time += self.OVERNIGHT_SECONDS
             self._day_pv = 0.0
             self._day_vol = 0
             pubs.append(("event", {"seq": self._next_seq(), "kind": "session",
                                    "action": "day_open",
                                    "day_count": self.day_count}))
             logger.info("session roll: day %d open", self.day_count)
-        else:
-            self.sim_unix_time += self.SECONDS_PER_MINUTE
+        # Bars are stamped at their close: minute m of a session ends at
+        # 09:15 + m minutes, on the session's own date (no overnight drift).
+        self.sim_unix_time = self.session_open_unix + self.SECONDS_PER_MINUTE * self.market_minute
+
+    def _next_session_open(self, open_unix: int) -> int:
+        """09:15 of the next weekday. Exchange holidays are not modelled."""
+        t = open_unix + self.SECONDS_PER_DAY
+        while datetime.fromtimestamp(t, timezone.utc).weekday() >= 5:
+            t += self.SECONDS_PER_DAY
+        return t
+
+    @staticmethod
+    def _calendar_month(unix: int) -> Tuple[int, int]:
+        d = datetime.fromtimestamp(unix, timezone.utc)   # IST wall time stored as UTC
+        return d.year, d.month
 
     def _review_tick_size(self) -> None:
-        """Session-boundary tick review (mirrors a real exchange's periodic
-        slab revision). Only fires when the price has crossed a band edge, so
-        the grid is stable across ordinary days. Never called intraday --
+        """Monthly tick review (NSE's band revision). Only changes anything
+        when the price has crossed a band edge. Never called intraday --
         re-gridding mid-session would strand every resting order.
         """
         new_tick = tick_for_price(self.last_price)
@@ -683,6 +796,9 @@ class MatchingEngine:
     # bars & indicators (all from real trades/book only, §8.5)
     # ------------------------------------------------------------------ #
     def _new_bar(self) -> dict:
+        """Flat at last_price until the first fill re-opens it there; a bar
+        with no trades closes flat at last_price with v=0 (as NSE data does)."""
+        self._bar_traded = False
         p = self.last_price
         return {"minute": self.market_minute, "o": p, "h": p, "l": p,
                 "c": p, "v": 0}

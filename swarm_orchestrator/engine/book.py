@@ -16,23 +16,23 @@ from typing import Deque, Dict, List, Optional, Set, Tuple
 
 from sortedcontainers import SortedDict
 
-# Venue tick bands. A single fixed tick cannot serve every price: ₹0.05 is
-# 0.026% of ₹190 but 1.6% of ₹3, coarse enough that a ₹3 instrument cannot
-# move at all. Real exchanges solve this with price slabs, reviewed on a
-# schedule -- never intraday, because re-gridding would strand resting orders.
-#
-# NOTE: NSE's real floor is ₹0.01. The sub-₹10 band below is finer than the
-# live market so low-priced instruments remain usable in simulation.
+# Venue tick bands: NSE cash-market tick table in force since 2025-04-15.
+# Checked against Kaggle NIFTY-100 1-minute closes from 2025-07 on, one or
+# more stocks per band (BANKINDIA/CENTRALBK, ITC/SBIN, RELIANCE/INFY,
+# APOLLOHOSP/BAJAJ-AUTO, MARUTI, BOSCHLTD): every close sits on its band's
+# grid. NSE reviews the band monthly (see MatchingEngine._advance_clock),
+# never intraday, because re-gridding would strand resting orders.
 TICK_BANDS = (
     #  price below      tick
-    (       10.0,      0.001),
-    (      100.0,      0.01),
+    (      250.0,      0.01),
     (     1000.0,      0.05),
-    (    10000.0,      0.10),
-    (float("inf"),     0.50),
+    (     5000.0,      0.10),
+    (    10000.0,      0.50),
+    (    20000.0,      1.00),
+    (float("inf"),     5.00),
 )
 
-DEFAULT_TICK = 0.05     # ₹100-₹1000 band; also the fallback for bare OrderBook()
+DEFAULT_TICK = 0.05     # ₹250-₹1000 band; also the fallback for bare OrderBook()
 
 # Epsilon for float price comparisons; must stay well below the smallest tick.
 _PRICE_EPS = 1e-9

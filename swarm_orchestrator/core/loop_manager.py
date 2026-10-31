@@ -12,11 +12,14 @@ class SwarmOrchestrator:
     QUIET_AWAKE_RATIO = 0.30
     NEWS_AWAKE_RATIO = 1.0
 
-    def __init__(self, client: EngineClient, seed: int | None = None) -> None:
+    def __init__(self, client: EngineClient, seed: int | None = None, clock=None) -> None:
         self.client = client
         self.agents: List = []
         self.running = False
         self._rng = random.Random(seed)
+        # agents.swarm_factory.TickClock shared with the agents; set from each
+        # tick before any agent acts.
+        self.clock = clock
         self._tick_count = 0
         self._last_news_tick = -self.NEWS_WINDOW_TICKS
 
@@ -40,7 +43,13 @@ class SwarmOrchestrator:
                 self._on_event(payload)
 
     async def _on_tick(self, tick: dict) -> None:
+        if tick.get("paused"):
+            # The market is closed: acting would only burn RNG draws and move
+            # cooldowns by however many paused seconds happened to pass.
+            return
         self._tick_count += 1
+        if self.clock is not None:
+            self.clock.observe(tick)
         # A replay is history playing back: agents stay silent (the engine would
         # reject their orders anyway) until a strategy's first fill hands over.
         if tick.get("mode") == "REPLAY":
@@ -53,12 +62,23 @@ class SwarmOrchestrator:
             if not agent.is_asleep and (orders := agent.on_tick(tick)):
                 batches.append((agent, orders))
 
-        if not batches:
-            return
+        # One agent at a time, in agent order: the engine then sees the same
+        # order sequence every run (concurrent submits over the socket pool
+        # arrive in whatever order the scheduler and network produce).
+        for agent, orders in batches:
+            try:
+                await self._submit_batch(agent, orders)
+            except Exception as exc:  # one agent's failure must not stop the tick
+                logger.error("Unexpected submit failure for %s: %r", agent.agent_id, exc)
 
-        for result in await asyncio.gather(*(self._submit_batch(a, o) for a, o in batches), return_exceptions=True):
-            if isinstance(result, Exception):
-                logger.error("Unexpected submit failure: %r", result)
+        # Lockstep (engine/lockstep.py): tell the engine this tick is done so
+        # it may run the next one. Clients without it (the in-process
+        # validation harness) are in lockstep by construction.
+        if (tick_done := getattr(self.client, "tick_done", None)) is not None and "seq" in tick:
+            try:
+                await tick_done(tick["seq"])
+            except TimeoutError as exc:
+                logger.warning("TICK_DONE not acknowledged: %s", exc)
 
     async def _submit_batch(self, agent, orders: List[dict]) -> None:
         for order in orders:

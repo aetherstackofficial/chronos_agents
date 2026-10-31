@@ -67,13 +67,8 @@ class HistoricalReplayer:
 
     GHOST_AGENT = "GHOST_HIST"
     LP_AGENT = "SIM_LP"
-    # Child prints per bar: open -> high -> low -> close.
-    CHILD_TARGETS = 4
-    # Cap on ladder levels per child so a large gap cannot bloat the book.
+    # Cap on ladder levels per leg so a large gap cannot bloat the book.
     MAX_WALK_LEVELS = 12
-    # Bar volume is used as total child quantity, capped for book stability.
-    MAX_BAR_QTY = 20_000
-    MIN_BAR_QTY = CHILD_TARGETS
     # Ghost/ladder orders live one tick only; the resting bracket after the
     # bar is re-quoted by the normal SIM_LP refresh cadence.
     DRIVE_TIF_TICKS = 1
@@ -83,6 +78,9 @@ class HistoricalReplayer:
         self.bars = bars
         self.cursor = 0
         self.finished = False
+        # (bar number, tape volume, shares printed) where the tape's volume
+        # was too small for its prices; see step().
+        self.inexact_bars: List[Tuple[int, int, int]] = []
 
     # ------------------------------------------------------------------ #
     # CSV loading
@@ -162,9 +160,11 @@ class HistoricalReplayer:
     # per-tick drive
     # ------------------------------------------------------------------ #
     def step(self, pubs: List[Tuple[str, dict]]) -> None:
-        """Consume one historical bar: print ~4 ghost child trades along
-        o -> h -> l -> c, then leave a resting SIM_LP bracket around the
-        close so swarm agents can trade during the live second."""
+        """Consume one historical bar: print exactly its volume along
+        o -> h -> l -> c (the first print at the open, every print inside
+        [l, h]), then leave a resting SIM_LP bracket around the close so
+        swarm agents can trade during the live second. A zero-volume bar
+        prints nothing and closes flat, as in NSE data."""
         engine = self.engine
         if self.cursor >= len(self.bars):
             if not self.finished:
@@ -185,45 +185,87 @@ class HistoricalReplayer:
         # from 1 Jan 2026, whatever dates the CSV held.)
         if bar.get("ts") is not None:
             engine.sim_unix_time = bar["ts"]
-        total_qty = max(self.MIN_BAR_QTY, min(bar["v"], self.MAX_BAR_QTY))
-        child_qty = max(1, total_qty // self.CHILD_TARGETS)
+        tick = engine.tick
+        targets = self.price_path(bar, tick)
+        volume = int(bar["v"])
+        last = round_to_tick(engine.last_price, tick)
+        if volume == 0 and len(targets) == 1 and abs(targets[0] - last) < tick / 2:
+            targets = []        # no trades: the bar closes flat at last_price
+        elif volume < len(targets):
+            # Fewer shares than distinct prices (e.g. o != c on 1 share) is
+            # impossible to print; vendor minute bars have it in thin names
+            # (BOSCHLTD 5.7% of bars). Prices win: a wrong close would carry
+            # into every later bar, while the extra volume is <= 3 shares.
+            self.inexact_bars.append((self.cursor, volume, len(targets)))
+            volume = len(targets)
+        legs = self._split(volume, len(targets))
 
-        for target in (bar["o"], bar["h"], bar["l"], bar["c"]):
+        for i, (target, qty) in enumerate(zip(targets, legs)):
             if engine.mode != "REPLAY":
                 return  # the latch fired; the swarm owns the price now
-            self._drive_to(target, child_qty, pubs)
+            # The open is a single print at the open price: walking from the
+            # previous close would print outside the bar.
+            self._drive_to(target, qty, pubs, walk=i > 0)
 
         if engine.mode == "REPLAY":
             engine._refresh_sim_lp(pubs, reference=bar["c"])
 
-    def _drive_to(self, target: float, child_qty: int,
-                  pubs: List[Tuple[str, dict]]) -> None:
-        """Print real trades that walk last_price to the target price.
+    @staticmethod
+    def price_path(bar: dict, tick: float) -> List[float]:
+        """The bar's print sequence: o -> h -> l -> c or o -> l -> h -> c,
+        repeated prices merged. A bar does not record whether its high or
+        low came first, so take the order needing fewer prints (a bar can
+        then be printed with as few shares as possible); on a tie, a bar
+        closing at or above its open dips first, otherwise it rallies first.
+        """
+        def merged(seq):
+            out: List[float] = []
+            for px in seq:
+                px = round_to_tick(px, tick)
+                if not out or abs(px - out[-1]) >= tick / 2:
+                    out.append(px)
+            return out
+        high_first = merged((bar["o"], bar["h"], bar["l"], bar["c"]))
+        low_first = merged((bar["o"], bar["l"], bar["h"], bar["c"]))
+        if len(low_first) != len(high_first):
+            return min(high_first, low_first, key=len)
+        return low_first if bar["c"] >= bar["o"] else high_first
 
-        Posts a SIM_LP limit ladder from last_price to the target, then
+    @staticmethod
+    def _split(volume: int, n: int) -> List[int]:
+        """Split volume into n leg sizes >= 1 that sum to it exactly."""
+        if n == 0:
+            return []
+        base, extra = divmod(volume, n)
+        return [base + (1 if i < extra else 0) for i in range(n)]
+
+    def _drive_to(self, target: float, qty: int,
+                  pubs: List[Tuple[str, dict]], walk: bool = True) -> None:
+        """Print exactly ``qty`` shares of real trades ending at the target.
+
+        Posts a SIM_LP limit ladder from last_price to the target (or one
+        level at the target when ``walk`` is False or the leg is flat), then
         fires a marketable ghost LIMIT at the target sized to the visible
-        opposite quantity — the limit price guarantees no overshoot, and
+        opposite quantity -- the limit price guarantees no overshoot, and
         the ladder guarantees the final print lands on the target. Swarm
-        orders resting inside the walked range fill for real on the way.
+        orders resting inside the walked range fill for real on the way,
+        which is why the leg can print more than ``qty`` with the swarm on.
         """
         engine = self.engine
-        target = round_to_tick(target, engine.tick)
         last = round_to_tick(engine.last_price, engine.tick)
         engine.flush_agent_orders(self.LP_AGENT)
 
-        if abs(target - last) < engine.tick / 2:
-            # Flat leg: print volume at the current price.
-            engine.submit_flow_order(self.LP_AGENT, "SELL", "LIMIT",
-                                     child_qty, target, pubs,
-                                     tif_ticks=self.DRIVE_TIF_TICKS)
-            side = "BUY"
-        else:
-            side = "BUY" if target > last else "SELL"
-            maker_side = "SELL" if side == "BUY" else "BUY"
-            per_level = max(1, child_qty // self.MAX_WALK_LEVELS)
-            for price in self._ladder_prices(last, target):
+        flat = abs(target - last) < engine.tick / 2
+        side = "BUY" if (flat or target > last) else "SELL"
+        maker_side = "SELL" if side == "BUY" else "BUY"
+        prices = self._ladder_prices(last, target, max_levels=qty) if walk and not flat else [target]
+        # Even spread over the ladder; the remainder sits at the target.
+        per_level, extra = divmod(qty, len(prices))
+        for j, price in enumerate(prices):
+            size = per_level + (extra if j == len(prices) - 1 else 0)
+            if size > 0:
                 engine.submit_flow_order(self.LP_AGENT, maker_side, "LIMIT",
-                                         per_level, price, pubs,
+                                         size, price, pubs,
                                          tif_ticks=self.DRIVE_TIF_TICKS)
 
         available = engine.book.cum_qty_within(side, target,
@@ -233,12 +275,14 @@ class HistoricalReplayer:
                                      available, target, pubs,
                                      tif_ticks=self.DRIVE_TIF_TICKS)
 
-    def _ladder_prices(self, last: float, target: float) -> List[float]:
+    def _ladder_prices(self, last: float, target: float,
+                       max_levels: int = MAX_WALK_LEVELS) -> List[float]:
         """Tick prices from just past last_price to the target (inclusive),
-        evenly thinned to at most MAX_WALK_LEVELS so big gaps stay cheap."""
+        evenly thinned to at most MAX_WALK_LEVELS (and max_levels) levels so
+        big gaps stay cheap and every level gets at least one share."""
         tick = self.engine.tick
         n_ticks = int(round(abs(target - last) / tick))
-        n_levels = min(max(n_ticks, 1), self.MAX_WALK_LEVELS)
+        n_levels = min(max(n_ticks, 1), self.MAX_WALK_LEVELS, max(1, max_levels))
         step = (target - last) / n_levels
         prices: List[float] = []
         seen: set = set()

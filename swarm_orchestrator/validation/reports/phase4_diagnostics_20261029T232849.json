@@ -1,0 +1,308 @@
+{
+ "seeds": 5,
+ "days": 20,
+ "warmup_days": 2,
+ "seconds": 187.09549641609192,
+ "runs": [
+  {
+   "seed": 1,
+   "k_ticks": 3,
+   "participation_quiet": 0.0010679613897970918,
+   "participation_news": 0.0020450349099214097,
+   "news_bar_fraction": 0.16266666666666665,
+   "parents": 643,
+   "parent_status": {
+    "replaced_opposite_side": 502,
+    "completed": 125,
+    "session_close": 16
+   },
+   "parent_fill_ratio": 0.2607053698131496,
+   "parent_shortfall_share": 0.7405742363331439,
+   "child_fill_rate": 0.14658721931830157,
+   "cap_binding_fraction": 0.6948613005911778,
+   "children": 2199,
+   "whale_share_of_sim_volume": 0.9540876544898983,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.004580223139686305,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 3329,
+    "CANCEL_ALL": 795
+   },
+   "mm_mean_abs_inventory_frac": 0.015401302751530772,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.9999826599447107,
+   "price_change": 0.11341621649004302
+  },
+  {
+   "seed": 1,
+   "k_ticks": 0,
+   "participation_quiet": 0.0010679613897970918,
+   "participation_news": 0.0020450349099214097,
+   "news_bar_fraction": 0.16266666666666665,
+   "parents": 643,
+   "parent_status": {
+    "replaced_opposite_side": 502,
+    "completed": 125,
+    "session_close": 16
+   },
+   "parent_fill_ratio": 0.2607053698131496,
+   "parent_shortfall_share": 0.7405742363331439,
+   "child_fill_rate": 0.14658721931830157,
+   "cap_binding_fraction": 0.6948613005911778,
+   "children": 2199,
+   "whale_share_of_sim_volume": 0.9540876544898983,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.004580223139686305,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 3329,
+    "CANCEL_ALL": 795
+   },
+   "mm_mean_abs_inventory_frac": 0.015401302751530772,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.9999826599447107,
+   "price_change": 0.11341621649004302
+  },
+  {
+   "seed": 2,
+   "k_ticks": 3,
+   "participation_quiet": 0.0014640942256880427,
+   "participation_news": 0.005399012458780635,
+   "news_bar_fraction": 0.1528,
+   "parents": 744,
+   "parent_status": {
+    "replaced_opposite_side": 624,
+    "session_close": 11,
+    "completed": 109
+   },
+   "parent_fill_ratio": 0.28899341001416,
+   "parent_shortfall_share": 0.7137321222525189,
+   "child_fill_rate": 0.17221457739462878,
+   "cap_binding_fraction": 0.8066992323796232,
+   "children": 2866,
+   "whale_share_of_sim_volume": 0.9664486537487972,
+   "mm_mean_abs_skew_ticks": 0.21326222222222221,
+   "sim_over_expected_nse_volume": 0.007146384697581678,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 4103,
+    "CANCEL_ALL": 903
+   },
+   "mm_mean_abs_inventory_frac": 0.05428790796651438,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.999926415655243,
+   "price_change": 0.19118191879833485
+  },
+  {
+   "seed": 2,
+   "k_ticks": 0,
+   "participation_quiet": 0.0014219871732152627,
+   "participation_news": 0.005375563037160376,
+   "news_bar_fraction": 0.1528,
+   "parents": 652,
+   "parent_status": {
+    "replaced_opposite_side": 582,
+    "session_close": 11,
+    "completed": 59
+   },
+   "parent_fill_ratio": 0.29765371093413634,
+   "parent_shortfall_share": 0.7052038817992378,
+   "child_fill_rate": 0.17467878841256,
+   "cap_binding_fraction": 0.8327808471454881,
+   "children": 2715,
+   "whale_share_of_sim_volume": 0.973070756495458,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.006936296439955423,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 3952,
+    "CANCEL_ALL": 811
+   },
+   "mm_mean_abs_inventory_frac": 0.05361335702715173,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.99993491532644,
+   "price_change": 0.08995479449151121
+  },
+  {
+   "seed": 3,
+   "k_ticks": 3,
+   "participation_quiet": 0.001753009202114072,
+   "participation_news": 0.006265009874858083,
+   "news_bar_fraction": 0.15933333333333333,
+   "parents": 819,
+   "parent_status": {
+    "completed": 92,
+    "replaced_opposite_side": 710,
+    "session_close": 17
+   },
+   "parent_fill_ratio": 0.29852898519403054,
+   "parent_shortfall_share": 0.7052221103727192,
+   "child_fill_rate": 0.17293297443331349,
+   "cap_binding_fraction": 0.8190909090909091,
+   "children": 3300,
+   "whale_share_of_sim_volume": 0.9705825472537367,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.008100784803829204,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 4513,
+    "CANCEL_ALL": 956
+   },
+   "mm_mean_abs_inventory_frac": 0.029646917014028603,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.9999652404335592,
+   "price_change": 0.2170215957076142
+  },
+  {
+   "seed": 3,
+   "k_ticks": 0,
+   "participation_quiet": 0.001753009202114072,
+   "participation_news": 0.006265009874858083,
+   "news_bar_fraction": 0.15933333333333333,
+   "parents": 819,
+   "parent_status": {
+    "completed": 92,
+    "replaced_opposite_side": 710,
+    "session_close": 17
+   },
+   "parent_fill_ratio": 0.29852898519403054,
+   "parent_shortfall_share": 0.7052221103727192,
+   "child_fill_rate": 0.17293297443331349,
+   "cap_binding_fraction": 0.8190909090909091,
+   "children": 3300,
+   "whale_share_of_sim_volume": 0.9705825472537367,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.008100784803829204,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 4513,
+    "CANCEL_ALL": 956
+   },
+   "mm_mean_abs_inventory_frac": 0.029646917014028603,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.9999652404335592,
+   "price_change": 0.2170215957076142
+  },
+  {
+   "seed": 4,
+   "k_ticks": 3,
+   "participation_quiet": 0.0013812409680301378,
+   "participation_news": 0.005886712589551083,
+   "news_bar_fraction": 0.15626666666666666,
+   "parents": 728,
+   "parent_status": {
+    "replaced_opposite_side": 566,
+    "session_close": 13,
+    "completed": 149
+   },
+   "parent_fill_ratio": 0.3293543539862302,
+   "parent_shortfall_share": 0.673786874305385,
+   "child_fill_rate": 0.21003766456005357,
+   "cap_binding_fraction": 0.7850356294536817,
+   "children": 2526,
+   "whale_share_of_sim_volume": 0.9619666020315222,
+   "mm_mean_abs_skew_ticks": 0.06663111111111111,
+   "sim_over_expected_nse_volume": 0.006939659489736467,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 3771,
+    "CANCEL_ALL": 883
+   },
+   "mm_mean_abs_inventory_frac": 0.04333485253741042,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.9999202116021927,
+   "price_change": 0.24098655321861387
+  },
+  {
+   "seed": 4,
+   "k_ticks": 0,
+   "participation_quiet": 0.0014918868759445688,
+   "participation_news": 0.005248268153049505,
+   "news_bar_fraction": 0.15626666666666666,
+   "parents": 806,
+   "parent_status": {
+    "replaced_opposite_side": 626,
+    "completed": 154,
+    "session_close": 26
+   },
+   "parent_fill_ratio": 0.3076012819329643,
+   "parent_shortfall_share": 0.6962773304053643,
+   "child_fill_rate": 0.19085122585292896,
+   "cap_binding_fraction": 0.7439801699716714,
+   "children": 2824,
+   "whale_share_of_sim_volume": 0.9634848740354036,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.0070357675148456774,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 4069,
+    "CANCEL_ALL": 961
+   },
+   "mm_mean_abs_inventory_frac": 0.06547268965012615,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.9998841636441227,
+   "price_change": 0.24697523543085867
+  },
+  {
+   "seed": 5,
+   "k_ticks": 3,
+   "participation_quiet": 0.0005376810987113052,
+   "participation_news": 0.0026961902669593333,
+   "news_bar_fraction": 0.16266666666666665,
+   "parents": 481,
+   "parent_status": {
+    "replaced_opposite_side": 286,
+    "completed": 183,
+    "session_close": 12
+   },
+   "parent_fill_ratio": 0.33303394699112837,
+   "parent_shortfall_share": 0.6764198471769397,
+   "child_fill_rate": 0.21582503692330632,
+   "cap_binding_fraction": 0.48686371100164205,
+   "children": 1218,
+   "whale_share_of_sim_volume": 0.9096523929199049,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.0030952340428282436,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 2239,
+    "CANCEL_ALL": 659
+   },
+   "mm_mean_abs_inventory_frac": 0.012737296596174279,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.999959593938099,
+   "price_change": 0.20989962673750703
+  },
+  {
+   "seed": 5,
+   "k_ticks": 0,
+   "participation_quiet": 0.0005376810987113052,
+   "participation_news": 0.0026961902669593333,
+   "news_bar_fraction": 0.16266666666666665,
+   "parents": 481,
+   "parent_status": {
+    "replaced_opposite_side": 286,
+    "completed": 183,
+    "session_close": 12
+   },
+   "parent_fill_ratio": 0.33303394699112837,
+   "parent_shortfall_share": 0.6764198471769397,
+   "child_fill_rate": 0.21582503692330632,
+   "cap_binding_fraction": 0.48686371100164205,
+   "children": 1218,
+   "whale_share_of_sim_volume": 0.9096523929199049,
+   "mm_mean_abs_skew_ticks": 0.0,
+   "sim_over_expected_nse_volume": 0.0030952340428282436,
+   "whale_messages": {
+    "MARKET": 0,
+    "LIMIT": 2239,
+    "CANCEL_ALL": 659
+   },
+   "mm_mean_abs_inventory_frac": 0.012737296596174279,
+   "mm_time_at_limit_frac": 0.0,
+   "mm_inventory_ar1": 0.999959593938099,
+   "price_change": 0.20989962673750703
+  }
+ ]
+}

@@ -1,0 +1,109 @@
+# Realism validation thresholds -- spec "Market Simulator Realism Validation
+# Spec" v1.0 (2026-10-28). Every value below is the spec's tunable default
+# (section 3 / 14.4) unless a comment says otherwise. Real-data acceptance
+# bands (section 15) are NOT stored here; calibrate.py writes them to
+# config/calibration_<INSTRUMENT>.json with dates and windows, and the report
+# card shows spec-default status and real-band comparison side by side.
+
+spec_version: "1.0"
+pass_rate: 0.90               # section 2.6: >= 90% of seeds must pass
+
+protocol:
+  warmup_days: 2              # section 2.2
+  n_returns_full: 100000      # section 2.2 (NSE: 374 returns/day -> 268 days)
+  n_seeds_full: 20
+  n_returns_smoke: 20000      # section 14.5
+  n_seeds_smoke: 5
+  bootstrap_block: 100        # T1/T4 moving-block bootstrap
+  bootstrap_resamples: 1000
+
+t1_fat_tails:
+  target_excess_kurtosis: 3.0
+  zero_frac_band_pp: 10.0     # sanity: within +/-10 pp of real instrument
+
+t2_vol_clustering:
+  ljung_box_p_max: 0.01
+  rho1_min: 0.05
+  beta_range: [0.1, 0.6]
+  max_lag: 100
+
+t3_no_autocorr:
+  ljung_box_p_min: 0.01
+  max_abs_rho: 0.03
+  lags: 5
+
+t4_vol_volume:
+  rho_min: 0.25
+  ablation_drop_min: 0.5      # circularity: ablation must halve Spearman
+
+t5_book_shape:
+  L: 20
+  max_min_ratio: 1.5
+  gamma_min: 1.0
+  fit_range: 10
+  min_snapshots: 1000
+
+t6_determinism:
+  replay_month: "2026-03"     # one month of real 1-min bars (spec: "one month")
+  part_b_days: 5
+
+t7_sqrt_impact:
+  delta_range: [0.4, 0.6]
+  delta_ci_upper_max: 0.8
+  r2_min: 0.85
+  Y_range: [0.3, 2.0]
+  horizon_Y_ratio_max: 1.5
+  book_walk_gate_ci_upper: 0.9
+  book_walk_Q: [100, 20000, 12]       # log-spaced, 12 values
+  metaorder_QV: [0.0005, 0.05, 8]     # log-spaced, 8 values
+  metaorder_T: [30, 120]
+
+t8_monotonic:
+  sizes: [100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+  symmetry_max_rel_diff: 0.20
+
+a1_aggregation:
+  scales_min: [1, 5, 15, 30, 60, 375]  # 375 = one NSE session (1 day)
+  daily_max_fraction_of_1min: 0.5
+
+a2_sign_memory:
+  max_lag: 100
+  positive_lags: 20
+  beta_max: 1.0
+
+a3_volume_clustering:
+  max_lag: 100
+  beta_range: [0.1, 0.6]      # "as for absolute returns" (spec A3)
+
+a4_intermittency:
+  top_fraction: 0.01
+  # Spec row truncated in the PDF: criterion is PROVISIONAL (see report).
+  cv_min: 1.0                 # clustered extremes => interarrival CV > 1
+
+a5_seasonality:
+  # Spec row truncated in the PDF: PROVISIONAL, judged only against the real band.
+  bins: 375
+
+a6_impact_decay:
+  horizons_after: [5, 30, 120]
+
+a7_recovery:
+  sweep_levels: 3
+  recovery_fraction: 0.9
+  max_wait_minutes: 60
+
+a8_no_free_lunch:
+  n_random: 1000
+  t_stat_max: 3.0
+  # Intraday NSE cash round trip, bps of one-leg notional (Rs 1L buy + 1L
+  # sell). STT 0.025% sell, NSE txn 0.00307%, SEBI Rs10/cr, stamp 0.003% buy,
+  # GST 18% on brokerage+txn+SEBI. Sources: zerodha.com/charges,
+  # upstox.com/brokerage-charges (checked 2026-10-29). 0.00307% vs NSE's
+  # 0.00297% (Oct 2024) is unresolved; impact on the total is ~0.04 bps.
+  cost_bps_zero_brokerage: 3.55
+  cost_bps_discount_broker: 8.27
+
+a9_leverage:
+  # Spec row truncated in the PDF: OPTIONAL and PROVISIONAL.
+  lags: 10
+  multi_day: 5
