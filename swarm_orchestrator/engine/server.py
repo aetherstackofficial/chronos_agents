@@ -17,6 +17,7 @@ from typing import List, Tuple
 import zmq
 from dotenv import load_dotenv
 
+from .lockstep import Lockstep
 from .matching_engine import MatchingEngine
 from .persistence import Persistence
 
@@ -39,10 +40,12 @@ def _publish(pub: zmq.Socket, pubs: List[Tuple[str, dict]]) -> None:
 
 
 def _handle_request(router: zmq.Socket, pub: zmq.Socket,
-                    engine: MatchingEngine, frames: List[bytes]) -> None:
+                    engine: MatchingEngine, frames: List[bytes],
+                    lock: Lockstep) -> None:
     """Decode one ROUTER request, tolerating both DEALER ([identity,
     payload]) and REQ ([identity, empty, payload]) envelopes, and reply
-    with a matching envelope."""
+    with a matching envelope. TICK_DONE is a scheduling message for the
+    server's lockstep, not for the engine core."""
     identity = frames[0]
     if len(frames) >= 3 and frames[1] == b"":
         envelope = [identity, b""]
@@ -55,7 +58,13 @@ def _handle_request(router: zmq.Socket, pub: zmq.Socket,
                      "reason": "invalid JSON payload", "seq": 0}
         publications: List[Tuple[str, dict]] = []
     else:
-        ack, publications = engine.handle_message(msg)
+        if isinstance(msg, dict) and msg.get("msg") == "TICK_DONE":
+            counted = lock.tick_done(msg.get("agent_id", ""), msg.get("tick_seq"))
+            ack = {"msg": "ACK", "status": "TICK_DONE" if counted else "TICK_DONE_STALE",
+                   "seq": engine.seq}
+            publications = []
+        else:
+            ack, publications = engine.handle_message(msg)
     router.send_multipart(envelope + [json.dumps(ack).encode()])
     _publish(pub, publications)
 
@@ -80,6 +89,14 @@ def main() -> None:
                 host, order_port, host, data_port)
 
 
+    # Opt-in lockstep (engine/lockstep.py): hold each physics tick until this
+    # many swarm workers have sent TICK_DONE for the previous one.
+    lock = Lockstep(int(os.getenv("CHRONOS_LOCKSTEP_WORKERS", "0")),
+                    float(os.getenv("CHRONOS_LOCKSTEP_TIMEOUT_S", "10")))
+    if lock.enabled:
+        logger.info("lockstep on: waiting for %d worker(s) per tick, timeout %.1fs",
+                    lock.workers, lock.timeout_s)
+
     engine.paused = True
     poller = zmq.Poller()
     poller.register(router, zmq.POLLIN)
@@ -93,10 +110,22 @@ def main() -> None:
                         frames = router.recv_multipart(zmq.NOBLOCK)
                     except zmq.Again:
                         break
-                    _handle_request(router, pub, engine, frames)
+                    _handle_request(router, pub, engine, frames, lock)
             now = time.monotonic()
-            if now >= next_tick:
-                _publish(pub, engine.physics_tick())
+            if now >= next_tick and lock.ready(now):
+                if lock.timed_out(now):
+                    logger.warning("lockstep timeout: %d worker(s) silent for %.1fs; "
+                                   "this run is no longer reproducible",
+                                   lock.missing(), lock.timeout_s)
+                    _publish(pub, [("event", {"seq": engine._next_seq(), "kind": "lockstep",
+                                              "action": "timeout",
+                                              "missing_workers": lock.missing()})])
+                lock.release()
+                pubs = engine.physics_tick()
+                _publish(pub, pubs)
+                tick = next((p for t, p in reversed(pubs) if t == "tick"), None)
+                if tick is not None:
+                    lock.published(tick["seq"], bool(tick.get("paused")), time.monotonic())
                 next_tick += TICK_INTERVAL_S
                 if next_tick <= now:  # fell behind; don't burst-tick
                     next_tick = now + TICK_INTERVAL_S

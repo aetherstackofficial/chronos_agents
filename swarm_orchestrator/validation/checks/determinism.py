@@ -78,9 +78,20 @@ def part_a(s: BarSeries, cfg: dict, seed: int = 1, swarm: bool = False) -> dict:
                  np.array_equal(sim["minute"] - 1, sub.minute))
     first = np.flatnonzero(bad)[:5]
     nse_ticks = np.vectorize(_nse_tick)(sub.c)
+    # Real bars no tape replay can print exactly: fewer shares than the
+    # fewest prints that reach o, h, l and c in order (o->h->l->c or
+    # o->l->h->c), or zero volume yet not flat at the previous close. The
+    # replayer keeps their prices and prints the minimum volume.
+    hl = 1 + (sub.h != sub.o).astype(int) + (sub.l != sub.h) + (sub.c != sub.l)
+    lh = 1 + (sub.l != sub.o).astype(int) + (sub.h != sub.l) + (sub.c != sub.h)
+    legs = np.minimum(hl, lh)
+    prev_c = np.r_[sub.o[0], sub.c[:-1]]
+    flat_at_prev = (legs == 1) & (paise(sub.o) == paise(prev_c))
+    impossible = ((sub.v > 0) & (sub.v < legs)) | ((sub.v == 0) & ~flat_at_prev)
     m = {"bars": float(len(sub)), "mismatching_bars": float(bad.sum()),
          **{f"mismatch_{k}": float(v) for k, v in per_field.items()},
-         "volume_over_engine_cap": float(np.mean(sub.v > 20000)),
+         "real_bars_unreproducible": float(impossible.sum()),
+         "mismatching_bars_excluding_unreproducible": float((bad & ~impossible).sum()),
          "real_close_off_engine_grid": _off_grid(sub.c, sim["engine_tick"]),
          "real_close_off_nse_grid": _off_grid(sub.c, nse_ticks),
          "engine_tick": float(sim["engine_tick"])}
@@ -118,7 +129,8 @@ def part_b(cfg: dict, price: float, seed: int = 1) -> dict:
             "extra": {"hash_seed": h1, "hash_seed_repeat": h2, "hash_null_strategy": hn,
                       "hash_other_seed": hd,
                       "deployed_rng_identical": d1 == d2,
-                      "deployed_note": ("worker.py seeds neither the orchestrator nor "
-                                        "random/numpy; two deployed-config runs with the "
-                                        "same engine seed give hashes "
-                                        + ("EQUAL" if d1 == d2 else "DIFFERENT"))}}
+                      "deployed_note": ("a worker started without --seed runs an unseeded "
+                                        "swarm; two such runs with the same engine seed give "
+                                        "hashes " + ("EQUAL" if d1 == d2 else "DIFFERENT")
+                                        + ". With --seed the worker builds the swarm the "
+                                        "harness tests (agents.swarm_factory).")}}

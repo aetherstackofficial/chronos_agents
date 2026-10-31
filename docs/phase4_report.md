@@ -5,6 +5,21 @@ Run 2026-10-30, commit `f8ed0a1` (Phase 4 code uncommitted). Same suite, mode, s
 - Baseline: `report_card_full_RELIANCE_20261029T151146.json`
 - Mechanism diagnostics: `phase4_diagnostics_20261029T232849.json` (5 seeds × 20 days, skew on vs off)
 
+> **Status update (2026-10-30).** These results predate three later engine fixes:
+> - bars now open at their first trade, which also corrects the agents' `volatility` input;
+> - replay is now exact;
+> - the swarm now uses a tick clock and per-agent seeds.
+>
+> This page keeps the Phase 4 numbers as measured. A fresh full run with all three fixes
+> (`report_card_full_RELIANCE_20261030T172449.json`, code hash `a830b651ceda66b4`) is the current
+> baseline:
+> - 2 of 19 tests pass; T6 replay and determinism now pass;
+> - 7 of 20 seeds run away above 2×;
+> - return autocorrelation is −0.097;
+> - volume–volatility coupling is about 0.
+>
+> The fixes correct the engine. Realism still depends on the liquidity step and Phase 2.
+
 **Result: 1 of 19 tests pass, 18 fail, 0 errors (Phase 1: 5 pass).**
 - The mechanisms work as specified. 23 unit tests pass against the real engine and its trade tape.
 - The median price outcome improves a lot, from −57% to −14%. Most metrics measured against real-data bands move toward real NSE.

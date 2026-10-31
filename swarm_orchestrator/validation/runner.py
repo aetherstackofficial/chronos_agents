@@ -15,7 +15,6 @@ import json
 import logging
 import math
 import os
-import subprocess
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -249,20 +248,27 @@ def aggregate(name: str, spec_results: list, real_results: list, calib: dict,
     return entry
 
 
-def _git_commit() -> str:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=HERE,
-                                       text=True).strip()
-    except Exception:
-        return "unknown"
+CODE_DIRS = ("engine", "agents", "core", "validation")
+CODE_FILES = ("worker.py",)
 
 
-def _dirty() -> bool:
-    try:
-        return bool(subprocess.check_output(["git", "status", "--porcelain", "--", "."],
-                                            cwd=os.path.dirname(HERE), text=True).strip())
-    except Exception:
-        return True
+def _code_hash() -> str:
+    """SHA-256 over the simulator's source, configs and model files, so a
+    report card names the exact code it measured, uncommitted edits
+    included. Version control is deliberately not consulted."""
+    root = os.path.dirname(HERE)
+    paths = [os.path.join(root, f) for f in CODE_FILES]
+    for d in CODE_DIRS:
+        for dirpath, dirnames, files in os.walk(os.path.join(root, d)):
+            dirnames[:] = [x for x in dirnames if x not in ("__pycache__", "reports")]
+            paths += [os.path.join(dirpath, f) for f in files
+                      if f.endswith((".py", ".yaml", ".json", ".zip", ".pkl"))]
+    h = hashlib.sha256()
+    for p in sorted(paths):
+        h.update(os.path.relpath(p, root).replace(os.sep, "/").encode())
+        with open(p, "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()[:16]
 
 
 def main(argv=None) -> None:
@@ -310,7 +316,7 @@ def main(argv=None) -> None:
                 print(f"ERROR {futs[f]}\n{errors[-1]['traceback']}", flush=True)
     from validation.report import build_report
     report = build_report(outputs, errors, calib, cfg, mode, a, price, n_days,
-                          _git_commit(), _dirty(), time.time() - t0)
+                          _code_hash(), time.time() - t0)
     os.makedirs(REPORT_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%S")
     path = os.path.join(REPORT_DIR, f"report_card_{a.mode}_{a.instrument}_{stamp}.json")

@@ -44,10 +44,11 @@ class _LiveAgentBase:
 
     def __init__(self, agent_id: str, clock=None) -> None:
         self.agent_id = agent_id
-        self.cash, self.inventory, self.is_asleep, self.last_trade = 0.0, 0, False, 0.0
+        # last_trade = -inf: "never traded", so a cooldown never depends on
+        # where the clock happens to start.
+        self.cash, self.inventory, self.is_asleep, self.last_trade = 0.0, 0, False, float("-inf")
         self.start_equity: float | None = None
-        # Injectable clock for tests; None reads the time module at call time
-        # (the validation harness swaps that module for a virtual clock).
+        # agents.swarm_factory injects a TickClock; None reads wall time.
         self._clock = clock
 
     def _now(self) -> float:

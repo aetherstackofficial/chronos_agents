@@ -15,7 +15,9 @@ def _fmt(x) -> str:
 
 def render(r: dict) -> str:
     lines = [f"# Baseline report card ({r['run']['mode']}, {r['simulator']['instrument']})", "",
-             f"Commit {r['simulator']['git_commit']} (dirty={r['simulator']['working_tree_dirty']}), "
+             # Older cards carry a git commit; newer ones a hash of the code itself.
+             (f"Code hash {r['simulator']['code_hash']}, " if "code_hash" in r["simulator"] else
+              f"Commit {r['simulator'].get('git_commit')} (dirty={r['simulator'].get('working_tree_dirty')}), ") +
              f"seeds {r['run']['n_seeds']}, N/seed {r['run']['n_returns_per_seed']}, "
              f"overall **{r['overall']['status']}** {r['overall']}", "",
              "| Test | Spec status | Seed pass rate | Real-band status | Failing criteria (pass rate) |",

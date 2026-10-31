@@ -47,15 +47,17 @@ class RedTeamAgent:
     SWEEP_QTY = 100                # small taker clip for sweeps
     DEPTH_LEVELS = 3               # top-of-book levels compared for thinness
 
-    def __init__(self, agent_id: str) -> None:
+    def __init__(self, agent_id: str, clock=None, rng: "random.Random | None" = None) -> None:
         self.agent_id = agent_id
         self.cash: float = 0.0
         self.inventory: int = 0
         self.is_asleep: bool = False
-        self.last_trade: float = 0.0
+        self.last_trade: float = float("-inf")       # never traded
         # Seeded per-agent RNG — sanctioned behavioural randomness only
         # (cooldown jitter + probabilistic sweep trigger, PROTOCOL.md §8).
-        self._rng = random.Random(f"redteam:{agent_id}")
+        # agents.swarm_factory passes one seeded from the run seed.
+        self._rng = rng or random.Random(f"redteam:{agent_id}")
+        self._clock = clock                           # TickClock; None = wall time
         self._cooldown_s = self.COOLDOWN_S
         self._mids: Deque[float] = deque(maxlen=self.MOMO_WINDOW)
         logger.info("[REDTEAM] %s online (heuristic predator, cap +/-%d)",
@@ -72,7 +74,7 @@ class RedTeamAgent:
             return []
         self._mids.append(mid)
 
-        now = time.time()
+        now = self._clock() if self._clock is not None else time.time()
         if now - self.last_trade < self._cooldown_s:
             return []
 

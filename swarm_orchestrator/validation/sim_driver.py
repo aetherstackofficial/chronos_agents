@@ -7,14 +7,14 @@ agents run unmodified. The driver only replaces the parts of the deployment
 that are not simulation logic:
 
 * ZMQ transport -> an in-process client whose ``send_order`` calls
-  ``engine.handle_message`` directly (same handler, same order of agents as
-  ``asyncio.gather`` schedules them).
-* Wall clock -> a virtual clock advanced by exactly 1.0 s per physics tick,
-  because live runs one tick per wall-clock second (engine/server.py) and the
-  agents' cooldowns read ``time.time()``.
-* Unseeded RNGs -> ``random`` / ``numpy.random`` global state and the
-  orchestrator RNG are seeded from the run seed (live leaves them unseeded,
-  which T6 Part B reports as a determinism failure of the deployed system).
+  ``engine.handle_message`` directly (same handler, same agent order).
+
+The swarm itself is built exactly as worker.py builds it
+(``agents.swarm_factory``): agents count cooldowns on a ``TickClock`` read
+from the tick payload and draw from per-agent RNGs seeded from the run seed,
+and the orchestrator submits agents' orders one agent at a time. A seeded
+worker therefore runs the same swarm as this harness. ``seed_globals=False``
+reproduces a worker started without ``--seed`` (unseeded swarm).
 
 Known, reported gaps that the driver cannot remove without changing the
 simulator: one tick is one sim-minute, so there are no sub-minute events,
@@ -28,7 +28,6 @@ import hashlib
 import os
 import random
 import sys
-import types
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -43,16 +42,6 @@ from engine.matching_engine import MatchingEngine  # noqa: E402
 # Live swarm composition from worker.py DEFAULT_COUNTS with ``--role all``
 # (red team is not part of "all", so it is off by default here too).
 LIVE_COUNTS = {"mm": 15, "whale": 4, "retail": 80, "redteam": 0}
-
-
-class _VirtualClock:
-    """Stands in for the ``time`` module inside agent modules."""
-
-    def __init__(self) -> None:
-        self.now = 1_000_000.0
-
-    def time(self) -> float:
-        return self.now
 
 
 class _InProcClient:
@@ -107,13 +96,15 @@ class Simulation:
         self.counts = dict(LIVE_COUNTS if counts is None else counts)
         # Imports first: loading the PPO models touches global RNG state, so
         # seeding before them would make run 1 of a process differ from run 2.
-        self.clock = _VirtualClock()
-        self._install_clock()
+        from agents.swarm_factory import TickClock, build_swarm
+        self.clock = TickClock()
+        self._install_fast_predict()
         if seed_globals:
+            # The swarm no longer draws from these; seeded so that any
+            # remaining global-RNG use still cannot make runs differ.
             random.seed(seed)
             np.random.seed(seed % (2 ** 32))
-        # seed_globals=False reproduces the deployment: worker.py builds the
-        # orchestrator with seed=None and never seeds random/numpy.
+        swarm_seed = seed if seed_globals else None
 
         self.engine = MatchingEngine(db=None)
         if replay_csv is None:
@@ -127,9 +118,9 @@ class Simulation:
             self._wrap_submit_for_logging()
 
         from core.loop_manager import SwarmOrchestrator
-        self.orch = SwarmOrchestrator(_InProcClient(self),
-                                      seed=seed if seed_globals else None)
-        self.orch.load_agents(self._build_agents())
+        self.orch = SwarmOrchestrator(_InProcClient(self), seed=swarm_seed,
+                                      clock=self.clock)
+        self.orch.load_agents(build_swarm(self.counts, swarm_seed, self.clock))
         # A null strategy is a tick subscriber that never sends anything
         # (runner/sdk.py only talks to the engine when on_tick returns
         # orders), so it lives outside the orchestrator and its RNG.
@@ -143,14 +134,6 @@ class Simulation:
         self.last_payload: Optional[dict] = None
 
     # -- setup ------------------------------------------------------------ #
-    def _install_clock(self) -> None:
-        shim = types.SimpleNamespace(time=self.clock.time)
-        import agents.live_agents as la
-        import agents.red_team as rt
-        la.time = shim
-        rt.time = shim
-        self._install_fast_predict()
-
     @staticmethod
     def _install_fast_predict() -> None:
         """Swap SB3 ``predict`` for a direct deterministic forward pass.
@@ -185,18 +168,6 @@ class Simulation:
                     raise RuntimeError("fast predict differs from SB3 predict")
             model.predict = fast
             model._fast_predict_ok = True
-
-    def _build_agents(self) -> list:
-        from agents.live_agents import (LiveMarketMaker, LiveRetailAgent,
-                                        LiveWhaleAgent)
-        from agents.red_team import RedTeamAgent
-        build = {"mm": lambda i: LiveMarketMaker(f"MM_{i}"),
-                 "whale": lambda i: LiveWhaleAgent(f"WHALE_{i}"),
-                 "retail": lambda i: LiveRetailAgent(f"RETAIL_{i}", seed=self.seed),
-                 "redteam": lambda i: RedTeamAgent(f"REDTEAM_{i}")}
-        # Same construction order as worker.build_agents("all").
-        return [build[k](i) for k in ("mm", "whale", "retail", "redteam")
-                for i in range(self.counts.get(k, 0))]
 
     def _wrap_submit_for_logging(self) -> None:
         eng = self.engine
@@ -254,7 +225,6 @@ class Simulation:
         self._log(("B", p["day_count"], p["market_minute"],
                    _ticks(bar["o"], eng.tick), _ticks(bar["c"], eng.tick),
                    int(bar["v"]), _ticks(bb, eng.tick), _ticks(ba, eng.tick)))
-        self.clock.now += 1.0
         return p
 
     def agents_act(self, tick: dict) -> None:
@@ -334,6 +304,8 @@ class Simulation:
 
     # -- snapshot / restore (harness-level; spec T7 setup step 2) --------- #
     def snapshot(self) -> dict:
+        # Agents hold the shared TickClock: the memo keeps that reference
+        # pointing at the live clock instead of a frozen copy.
         return copy.deepcopy({
             "engine": self.engine,
             "agents": self.orch.agents,
@@ -343,10 +315,10 @@ class Simulation:
             "np_rng": np.random.get_state(),
             "clock": self.clock.now,
             "last_payload": self.last_payload,
-        })
+        }, {id(self.clock): self.clock})
 
     def restore(self, snap: dict) -> None:
-        s = copy.deepcopy(snap)
+        s = copy.deepcopy(snap, {id(self.clock): self.clock})
         self.engine = s["engine"]
         self.orch.agents = s["agents"]
         rng_state, self.orch._tick_count, self.orch._last_news_tick = s["orch"]

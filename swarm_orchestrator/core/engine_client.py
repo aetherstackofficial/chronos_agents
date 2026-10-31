@@ -9,6 +9,7 @@ DATA_TOPICS = ["tick", "trade", "event"]
 
 class EngineClient:
     def __init__(self, identity_prefix: str, pool_size: int = 4, host: str | None = None, order_port: int | None = None, data_port: int | None = None) -> None:
+        self.identity_prefix = identity_prefix
         resolved_host = host if host is not None else env_host()
         self.gateway = AsyncOrderGateway(identity_prefix, host=resolved_host, port=order_port, pool_size=pool_size)
         
@@ -21,6 +22,10 @@ class EngineClient:
 
     async def control(self, msg: dict) -> dict:
         return await self.gateway.request(msg)
+
+    async def tick_done(self, tick_seq: int) -> dict:
+        """Lockstep report: this worker has finished the tick with ``tick_seq``."""
+        return await self.gateway.request({"msg": "TICK_DONE", "agent_id": self.identity_prefix, "tick_seq": tick_seq})
 
     async def fetch_state(self) -> dict:
         return await self.control({"msg": "FETCH_STATE"})

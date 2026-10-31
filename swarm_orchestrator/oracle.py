@@ -42,7 +42,7 @@ CACHE_SIZE = 256
 _STRONG_NEGATIVE = {"bankruptcy": -0.9, "fraud": -0.9, "default": -0.8, "crash": -0.8, "hack": -0.7, "breach": -0.7, "war": -0.7, "scandal": -0.7, "plunge": -0.7, "recall": -0.6, "lawsuit": -0.6, "ban": -0.6, "sanction": -0.6, "sanctions": -0.6, "downgrade": -0.6, "probe": -0.5, "resign": -0.5, "resigns": -0.5, "strike": -0.5, "layoff": -0.5, "layoffs": -0.5, "misses": -0.5, "loss": -0.5}
 _STRONG_POSITIVE = {"record profit": 0.8, "record profits": 0.8, "breakthrough": 0.7, "beats": 0.6, "upgrade": 0.6, "approval": 0.6, "surge": 0.6, "acquisition": 0.5, "partnership": 0.5, "buyback": 0.5, "wins": 0.5, "expansion": 0.4, "contract": 0.4, "dividend": 0.4, "profit": 0.4}
 _POLARITY = {**_STRONG_NEGATIVE, **_STRONG_POSITIVE}
-_POLARITY_COMPILED = [(phrase.split(), weight) for phrase, weight in sorted(_POLARITY.items(), key=lambda p: -len(p.split()))]
+_POLARITY_COMPILED = [(phrase.split(), weight) for phrase, weight in sorted(_POLARITY.items(), key=lambda p: -len(p[0].split()))]
 
 _NEGATORS = frozenset({"not", "no", "never", "denies", "denied", "deny", "avoids", "avoided", "avoid", "averts", "averted", "dismisses", "dismissed", "without"})
 

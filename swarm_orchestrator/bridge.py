@@ -221,6 +221,9 @@ class ReplayStartReq(BaseModel):
     sector: Optional[str] = None
     seed: Optional[int] = None
 
+class HandoverReq(BaseModel):
+    at_bar: Optional[int] = None    # tape bars to replay first; None = bars replayed so far
+
 class StrategyRunReq(BaseModel):
     name: str
     code: str
@@ -280,6 +283,17 @@ async def replay_start(req: ReplayStartReq) -> dict:
     if not (ack := await _control_request(msg)):
         raise HTTPException(status_code=502, detail="engine did not acknowledge REPLAY_START")
     return {"status": ack.get("status"), "run_id": ack.get("run_id"), "bars": ack.get("bars")}
+
+@app.post("/api/replay/handover")
+async def replay_handover(req: HandoverReq) -> dict:
+    """Switch a replay to REACTIVE after ``at_bar`` tape bars, no user trade needed (PROTOCOL §9)."""
+    msg = {"msg": "HANDOVER"}
+    if req.at_bar is not None: msg["at_bar"] = req.at_bar
+    if not (ack := await _control_request(msg)):
+        raise HTTPException(status_code=502, detail="engine did not acknowledge HANDOVER")
+    if ack.get("status") == "REJECTED":
+        raise HTTPException(status_code=409, detail=ack.get("reason", "HANDOVER rejected"))
+    return {"status": ack.get("status"), "at_bar": ack.get("at_bar"), "bars_replayed": ack.get("bars_replayed")}
 
 @app.post("/api/strategy/run")
 async def strategy_run(req: StrategyRunReq) -> dict:

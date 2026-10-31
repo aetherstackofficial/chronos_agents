@@ -2,23 +2,22 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s[SWARM] - %(message)s")
 log = logging.getLogger(__name__)
 
-from agents.live_agents import LiveMarketMaker, LiveRetailAgent, LiveWhaleAgent
-from agents.red_team import RedTeamAgent
-import argparse, asyncio, os, random, sys
-import numpy as np
+# The models (torch) must load before zmq: on Windows the other order fails (WinError 1114).
+import agents.live_agents  # noqa: F401
+import argparse, asyncio, os, sys
 from dotenv import load_dotenv
+from agents.swarm_factory import DEFAULT_COUNTS, TickClock, build_swarm
 from core.engine_client import EngineClient
 from core.loop_manager import SwarmOrchestrator
 
-DEFAULT_COUNTS = {"mm": 15, "whale": 4, "retail": 80, "redteam": 3}
-# Only retail reads the run seed so far; the other roles ignore it.
-_BUILDERS = {"mm": lambda i, seed: LiveMarketMaker(f"MM_{i}"), "whale": lambda i, seed: LiveWhaleAgent(f"WHALE_{i}"), "retail": lambda i, seed: LiveRetailAgent(f"RETAIL_{i}", seed=seed), "redteam": lambda i, seed: RedTeamAgent(f"REDTEAM_{i}")}
+ALL_ROLES = ("mm", "whale", "retail")   # --role all; red team runs as its own worker
 
-def build_agents(role: str, count: int | None, seed: int | None = None) -> list:
+def build_agents(role: str, count: int | None, seed: int | None = None, clock: TickClock | None = None) -> list:
+    clock = clock or TickClock()
     if role == "all":
         if count is not None: log.warning("--count is ignored with --role all (per-role defaults apply).")
-        return [agent for sub in ("mm", "whale", "retail") for agent in (_BUILDERS[sub](i, seed) for i in range(DEFAULT_COUNTS[sub]))]
-    return [_BUILDERS[role](i, seed) for i in range(count if count is not None else DEFAULT_COUNTS[role])]
+        return build_swarm({r: DEFAULT_COUNTS[r] for r in ALL_ROLES}, seed, clock)
+    return build_swarm({role: count if count is not None else DEFAULT_COUNTS[role]}, seed, clock)
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Chronos swarm worker (push-driven, two-plane).")
@@ -27,7 +26,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--host", default=None)
     p.add_argument("--port", type=int, default=None)
     p.add_argument("--data-port", type=int, default=None)
-    p.add_argument("--seed", type=int, default=None, help="Run seed for the whole swarm (personalities, wake-ups, random draws). Omit for a fresh random one, which is logged so the run can be repeated.")
+    p.add_argument("--seed", type=int, default=int(s) if (s := os.getenv("CHRONOS_SEED")) else None,
+                   help="seeds the orchestrator and every agent (env CHRONOS_SEED); omit for an unseeded swarm")
     return p.parse_args(argv)
 
 async def run_worker(args: argparse.Namespace) -> None:
@@ -37,8 +37,10 @@ async def run_worker(args: argparse.Namespace) -> None:
     np.random.seed(seed % (2 ** 32))
     log.info(f"Swarm seed = {seed} (pass --seed {seed} to repeat this run).")
     client = EngineClient(prefix := f"SWARM_{args.role.upper()}_{os.getpid()}", host=args.host, order_port=args.port, data_port=args.data_port)
-    (orch := SwarmOrchestrator(client, seed=seed)).load_agents(agents := build_agents(args.role, args.count, seed))
-    log.info(f"Worker '{prefix}' starting with {len(agents)} agents (role={args.role}).")
+    clock = TickClock()
+    (orch := SwarmOrchestrator(client, seed=args.seed, clock=clock)).load_agents(agents := build_agents(args.role, args.count, args.seed, clock))
+    log.info(f"Worker '{prefix}' starting with {len(agents)} agents (role={args.role}, seed={args.seed}).")
+    if args.seed is None: log.warning("No --seed: the swarm is unseeded, so runs are not reproducible.")
     try: await orch.run()
     except asyncio.CancelledError: pass
     finally:

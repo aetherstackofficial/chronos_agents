@@ -3,6 +3,14 @@
 Run 2026-10-29, commit `d3162a4` (suite uncommitted). Spec: "Market Simulator Realism Validation Spec" v1.0.
 Report card: `swarm_orchestrator/validation/reports/report_card_full_RELIANCE_20261029T151146.json`.
 
+> **Status update (2026-10-30).** This page is the baseline as measured; its numbers stay as
+> recorded. Since then:
+> - gap 5 (replay fidelity) is fixed: T6 Part A replays 0 of 7,125 bars wrong;
+> - gap 6 (deployed determinism) is fixed: seeded worker plus opt-in lockstep;
+> - the tick table is now NSE's.
+>
+> See `swarm_orchestrator/PROTOCOL.md` §2, §3.1 and §9.
+
 **Result: 5 of 19 tests pass, 14 fail, 0 errors.** The simulator has heavy tails and a volume-volatility link, but:
 - its price falls in every seed;
 - volume is about 14× too low and very lumpy;
