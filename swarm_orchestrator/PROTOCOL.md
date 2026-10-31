@@ -94,7 +94,10 @@ All requests carry `"msg"`. Unknown fields are ignored; missing required fields 
   "type": "MARKET" | "LIMIT", "qty": 100,
   "price": 190.05,            // required for LIMIT; ignored for MARKET
   "client_order_id": "w0-17", // optional echo field
-  "tif_ticks": 20 }           // optional time-to-live in physics ticks (default 60; 0 = day)
+  "tif_ticks": 20,            // optional time-to-live in physics ticks (default 60; 0 = day)
+  "start_cash": 85000.0 }     // optional, Retail agents only, honoured on the agent's FIRST message
+                              // (ORDER or CANCEL_ALL) and ignored afterwards; must be in
+                              // [10_000, 1e9], otherwise the default 50_000 ledger is used
 
 // Cancel one / all resting orders
 { "msg": "CANCEL", "agent_id": "MM_3", "order_id": 4711 }
@@ -239,7 +242,8 @@ Batched writes once per tick; readers (bridge) open read-only.
    tracked but excluded from the leaderboard.
 5. **OFI, VWAP, RSI, OHLC bars, volume — all computed from real trades/book only.**
 6. **Single liquidation authority:** engine checks retail equity < ₹1,000 → resets ledger to
-   ₹50,000 cash / 0 pos, publishes `event kind=liquidation`. Workers only react to the event.
+   the agent's own starting cash (₹50,000 unless it sent `start_cash`) / 0 pos, publishes
+   `event kind=liquidation`. Workers only react to the event.
 7. **Determinism:** engine owns `self.rng = random.Random(seed)`; NO module-level `random.*`
    in engine code. Same seed + same order stream ⇒ identical run.
 8. **Order TTL:** resting orders expire after `tif_ticks` physics ticks (default 60) via the

@@ -192,7 +192,7 @@ class Simulation:
         from agents.red_team import RedTeamAgent
         build = {"mm": lambda i: LiveMarketMaker(f"MM_{i}"),
                  "whale": lambda i: LiveWhaleAgent(f"WHALE_{i}"),
-                 "retail": lambda i: LiveRetailAgent(f"RETAIL_{i}"),
+                 "retail": lambda i: LiveRetailAgent(f"RETAIL_{i}", seed=self.seed),
                  "redteam": lambda i: RedTeamAgent(f"REDTEAM_{i}")}
         # Same construction order as worker.build_agents("all").
         return [build[k](i) for k in ("mm", "whale", "retail", "redteam")

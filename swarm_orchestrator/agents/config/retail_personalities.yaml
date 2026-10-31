@@ -1,0 +1,260 @@
+# Phase 2 retail rules -- FROZEN 2026-10-30, before any Phase 2 run.
+# Changing a value here after Phase 2 runs start invalidates the Phase 2 vs
+# Phase 4 comparison; record any change with a date and a reason.
+#
+# Principle: build the cause, never force the effect. Nothing here sets a
+# price direction. Every number is a behaviour of one agent, and every agent
+# is symmetric between buying and selling.
+#
+# Time is counted in engine minutes, never wall-clock seconds:
+#   t = tick["day_count"] * session_minutes + tick["market_minute"]
+# "Tick" below means one engine minute (one physics tick).
+
+meta:
+  version: 1
+  frozen: "2026-10-30"
+  owner: akash
+  session_minutes: 375
+  label: "uncalibrated: no NSE data on retail behaviour; fixed by rule, never tuned to pass tests"
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+determinism:
+  # Every agent builds its own random.Random(f"{run_seed}:{agent_id}"), so the
+  # same seed always gives the same 80 personalities and the same decisions,
+  # whatever order agents are created or woken in.
+  seed_scheme: "run_seed:agent_id"
+  # No module-level random / numpy.random anywhere in the retail path.
+  # The old global 10% noise rule (heuristic_retail.py) is REMOVED; noise
+  # now lives only in the noise personality below.
+  legacy_global_noise: 0.0
+
+# ---------------------------------------------------------------------------
+# Who each agent is (drawn once, at creation)
+# ---------------------------------------------------------------------------
+personality:
+  # Share of agents per type. Must sum to 1.0.
+  type_mix:
+    momentum: 0.40          # buys strength: RSI above own centre -> buy
+    mean_reverter: 0.40     # buys weakness: RSI below own centre -> buy
+    noise: 0.20             # ignores RSI; random side, small random chance per tick
+
+  # RSI is in points (0-100). features.py sends rsi/100, so convert first.
+  # The simulated RSI stayed 44-56 in the baseline, so centres are kept
+  # close to 50: a centre of 30 or 70 would never trade.
+  rsi_center:
+    dist: normal
+    mean: 50.0
+    std: 5.0
+    clip: [40.0, 60.0]
+
+  # Smooth response instead of an on/off line:
+  #   conviction = 2 / (1 + exp(-slope * (rsi - rsi_center))) - 1      (in -1..+1)
+  # Mean reverter: buy when conviction is negative (RSI below centre).
+  # Momentum: the sign is flipped.
+  logistic_slope: 0.25
+
+  # Each agent only acts when |conviction| passes its own threshold.
+  conviction_threshold:
+    dist: uniform
+    low: 0.10
+    high: 0.35
+
+  # Chance an eligible agent actually trades on a tick it is awake and off
+  # cooldown, scaled by |conviction|: p = base_trade_prob * |conviction|.
+  base_trade_prob: 0.30
+
+  # Minutes between this agent's orders (drawn once per agent).
+  cooldown_ticks:
+    dist: uniform_int
+    low: 3
+    high: 20
+
+  noise_agent:
+    # A noise agent trades with this chance per awake tick, side 50/50.
+    # This replaces the separate "cash-need trade" idea.
+    trade_prob_per_tick: 0.05
+    exit_style: time_based
+    # It has no signal, so its order size uses a random conviction instead.
+    # (added 2026-10-31, before any Phase 2 run)
+    conviction:
+      dist: uniform
+      low: 0.10
+      high: 0.50
+
+# ---------------------------------------------------------------------------
+# How much each agent can hold and trade
+# ---------------------------------------------------------------------------
+wealth:
+  # Retail starts with CASH ONLY, never shares. Bigger agents are rarer.
+  starting_shares: 0
+
+  starting_cash:
+    # 2026-10-30: the engine now honours an optional "start_cash" on a retail
+    # agent's first message (matching_engine.py _ensure_agent; allowed band
+    # 10,000 .. 1e9, else it falls back to 50,000). So per_agent is live.
+    # engine_default = everyone gets the engine's fixed 50,000 (about 36
+    # shares at Rs 1,354), which limits how different agents' sizes can be.
+    source: per_agent               # engine_default | per_agent
+    per_agent:
+      dist: pareto                  # heavy tail: few rich, most small
+      minimum: 25000.0              # xm
+      shape: 1.3                    # alpha; median ~ 42,500, mean ~ 108,000
+      clip_max: 20000000.0
+    engine_default: 50000.0
+
+  # Largest position any retail agent may hold (long or short), in shares.
+  # = 25% of the SMALLEST whale capacity (50,000). Hard ceiling; the tail
+  # makes reaching it very unlikely (a few in ten thousand agents).
+  max_position:
+    reference_whale_min_capacity: 50000
+    fraction_of_whale: 0.25
+    hard_cap_shares: 12500
+    # Actual capacity = min(hard_cap_shares, cash * leverage_limit / price).
+    leverage_limit: 1.0
+    
+  allow_short: true
+
+  # Agent-side guards (the engine does no cash or position check at all).
+  guards:
+    reserve_cash_for_resting_buys: true
+    reserve_shares_for_resting_sells: true      # only counts when not shorting
+    max_position_applies_to_resting_orders: true
+    # Before placing new orders, send CANCEL_ALL first: its ack carries the
+    # fresh cash and position (resting fills are not pushed to the agent).
+    resync_with_cancel_all: true
+
+# ---------------------------------------------------------------------------
+# Order size and type
+# ---------------------------------------------------------------------------
+orders:
+  # Share of cash risked per order; drawn once per agent.
+  risk_appetite:
+    dist: uniform
+    low: 0.01
+    high: 0.05
+  # qty = floor(risk_appetite * cash * |conviction| / price), at least 1,
+  # then capped by max_position and by the participation cap below.
+  min_qty: 1
+
+  # The plan's own number (matches the whale training env); no NSE source.
+  participation_cap: 0.15
+  participation_cap_label: "plan's own number; no NSE source"
+  # Cap is applied to EXPECTED NSE volume (agents/config/volume_curves.json),
+  # the same basis as the whale slicer: no single retail order, entry or
+  # exit, may exceed this share of the expected shares traded that minute.
+  # A larger exit is simply sent in several pieces on later minutes.
+
+  # Each order is a market order or a limit order.
+  type_mix:
+    market: 0.50
+    limit: 0.50
+
+  limit:
+    # Passive limit: placed on the agent's OWN side, `offset` ticks behind the
+    # best price (0 = join the best bid for a buy / best ask for a sell).
+    # Prices are snapped to tick["tick_size"].
+    offset_ticks_choices: [0, 1, 2, 3, 5]
+    offset_ticks_weights: [0.30, 0.25, 0.20, 0.15, 0.10]
+    # Resting orders expire on their own through the engine's tif_ticks.
+    tif_ticks:
+      dist: uniform_int
+      low: 5
+      high: 30
+    # Urgent exits always go out as MARKET orders: nobody waits in a queue to
+    # cut a loss or to flee. Every other exit, and every entry, rolls the
+    # market/limit dice above. (added 2026-10-31, before any Phase 2 run)
+    urgent_exit_reasons: [stop_loss, trailing, max_hold, fear_profit, capitulation]
+    # An agent has at most ONE order outstanding. So the cash / share
+    # reservation guard is the check at send time (a buy must fit in cash at
+    # its LIMIT price, a sell in the shares held, both under max_position),
+    # and a resting order is resolved with CANCEL_ALL, whose ack carries the
+    # fresh cash and position, when its time-to-live has passed.
+
+# ---------------------------------------------------------------------------
+# Exits: holding time comes from each agent's exit strategy, not a constant
+# ---------------------------------------------------------------------------
+exits:
+  # Every position is closed after at most this many minutes, whatever its
+  # exit style (added 2026-10-31, before any Phase 2 run: a target/stop or
+  # trailing exit that never triggers would otherwise freeze the agent).
+  max_hold_ticks: 750              # two sessions
+
+  # Each agent gets its own preference over these four styles, drawn once
+  # from a flat Dirichlet. Each TRADE then draws fresh parameters, so the
+  # holding time varies trade to trade as well as agent to agent.
+  style_preference:
+    dist: dirichlet
+    alpha: [1.0, 1.0, 1.0, 1.0]
+    styles: [time_based, target_stop, trailing_stop, signal_reversal]
+
+  time_based:
+    hold_ticks:
+      dist: lognormal
+      median: 40
+      sigma: 0.8
+      clip: [5, 750]               # 750 = two sessions
+
+  target_stop:
+    take_profit_pct:
+      dist: uniform
+      low: 0.30
+      high: 2.00
+    stop_loss_pct:
+      dist: uniform
+      low: 0.30
+      high: 1.50
+
+  trailing_stop:
+    trail_pct:
+      dist: uniform
+      low: 0.30
+      high: 1.00
+
+  signal_reversal:
+    # Exit when the signal flips to the other side beyond this agent's own
+    # conviction threshold (a long exits at signal <= -threshold, a short at
+    # >= +threshold). The universal exits.max_hold_ticks is the safety net.
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# Emotions (reactions to REALISED results; a "loss" is a closed trade with
+# profit < 0, never a paper loss)
+# ---------------------------------------------------------------------------
+emotions:
+  loss_overtrade:
+    # After a realised loss: with this chance the agent trades more
+    # aggressively for the next `duration_trades` trades.
+    probability: 0.60
+    duration_trades: 2
+    size_multiplier: {dist: uniform, low: 1.5, high: 2.0}
+    cooldown_multiplier: 0.5        # cooldown is halved (never below 1 minute)
+    threshold_multiplier: 0.7       # the conviction threshold is lowered to 70%
+
+  profit_fear:
+    # When a trade is opened, with this chance the agent is "scared of losing
+    # its profit": it takes profit early at a small random gain, overriding
+    # the normal exit if that comes sooner.
+    probability: 0.40
+    early_take_profit_pct: {dist: uniform, low: 0.10, high: 0.50}
+
+  capitulation:
+    # This many realised losses IN A ROW -> sell/cover everything at market
+    # and stop trading for the rest of that day. A win resets the streak.
+    # An agent holds one position at a time, so right after its third loss
+    # it is already flat: in practice this is "stop for the day", and any
+    # shares still open (a partial exit, an adopted position) are dumped.
+    consecutive_losses: 3
+    halt_until: next_session
+    streak_resets_on_new_day: true
+
+# ---------------------------------------------------------------------------
+# Things deliberately NOT in Phase 2 (to avoid mixing changes)
+# ---------------------------------------------------------------------------
+not_in_phase_2:
+  - round-number and swing-high/low price preference (Phase 3)
+  - removal of the engine's retail liquidation reset (matching_engine.py _check_liquidations)
+  - SIM_LP removal and MM liquidity (separate liquidity step with Krishna)
+  - changes to the orchestrator's 30% awake ratio
+  - intraday seasonality of retail activity (candidate for a later step)

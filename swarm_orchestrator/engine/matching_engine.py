@@ -55,6 +55,12 @@ class MatchingEngine:
     CASH_INSTITUTION = 5_000_000.0
     CASH_MARKET_MAKER = 250_000.0
     CASH_RETAIL = 50_000.0
+    # A retail agent may ask for its own starting cash (optional ``start_cash``
+    # on its first message); anything outside this band falls back to
+    # CASH_RETAIL. Retail only: institutions, market makers and strategies
+    # keep their fixed ledgers.
+    RETAIL_CASH_MIN = 10_000.0
+    RETAIL_CASH_MAX = 1e9
     CASH_STRATEGY = 1_000_000.0
     CASH_ORACLE = 1e9
     CASH_INTERNAL = 1e12                      # SIM_LP / GHOST flow agents
@@ -187,10 +193,24 @@ class MatchingEngine:
             return "Market Maker", cls.CASH_MARKET_MAKER, False
         return "Retail", cls.CASH_RETAIL, False
 
-    def _ensure_agent(self, agent_id: str) -> dict:
+    def _requested_retail_cash(self, value) -> Optional[float]:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        cash = float(value)
+        if not math.isfinite(cash) \
+                or not self.RETAIL_CASH_MIN <= cash <= self.RETAIL_CASH_MAX:
+            return None
+        return cash
+
+    def _ensure_agent(self, agent_id: str,
+                      start_cash: Optional[float] = None) -> dict:
+        """Ledger for ``agent_id``, created on first sight. ``start_cash`` is
+        honoured only at creation and only for Retail agents."""
         led = self.agent_ledger.get(agent_id)
         if led is None:
             a_type, cash, internal = self._classify_agent(agent_id)
+            if a_type == "Retail":
+                cash = self._requested_retail_cash(start_cash) or cash
             led = {"id": agent_id, "type": a_type, "cash": cash, "pos": 0,
                    "start_cash": cash, "internal": internal}
             self.agent_ledger[agent_id] = led
@@ -341,7 +361,8 @@ class MatchingEngine:
         return cancelled
 
     def _check_liquidations(self, agent_ids, pubs: List[Publication]) -> None:
-        """Retail bankruptcy reset (§8.6): equity < threshold -> fresh 50k."""
+        """Retail bankruptcy reset (§8.6): equity < threshold -> the agent's
+        own starting cash (50k unless it asked for another amount)."""
         for aid in agent_ids:
             led = self.agent_ledger.get(aid)
             if led is None or led["type"] != "Retail":
@@ -349,7 +370,7 @@ class MatchingEngine:
             equity = led["cash"] + led["pos"] * self.last_price
             if equity < self.LIQUIDATION_THRESHOLD:
                 self.flush_agent_orders(aid)
-                led["cash"] = self.CASH_RETAIL
+                led["cash"] = led["start_cash"]
                 led["pos"] = 0
                 pubs.append(("event", {"seq": self._next_seq(),
                                        "kind": "liquidation",
@@ -470,6 +491,7 @@ class MatchingEngine:
                 "reasoning": news.get("reasoning", ""),
                 "source": news.get("source", "fallback")}))
 
+        self._ensure_agent(agent_id, msg.get("start_cash"))
         ack = self._submit_order(agent_id, action, order_type, qty, price,
                                  tif, pubs, client_order_id)
         return ack, pubs
@@ -500,7 +522,7 @@ class MatchingEngine:
         if not isinstance(agent_id, str) or not agent_id:
             return self._reject("missing agent_id")
         count = self.flush_agent_orders(agent_id)
-        led = self._ensure_agent(agent_id)
+        led = self._ensure_agent(agent_id, msg.get("start_cash"))
         return {"msg": "ACK", "status": "CANCELLED", "order_id": 0,
                 "executed_qty": 0, "average_price": 0.0, "resting_qty": 0,
                 "cancelled": count, "cash": round(led["cash"], 2),

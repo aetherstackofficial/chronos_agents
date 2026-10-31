@@ -29,6 +29,9 @@ reportlab>=4.0
 
 # Configuration
 python-dotenv>=1.0
+# agents/execution.py and agents/heuristic_retail.py load their frozen rules
+# from agents/config/*.yaml at import time
+pyyaml>=6.0
 
 # HTTP client -- oracle.py's Groq tier at runtime, and the FastAPI test client
 httpx>=0.27
