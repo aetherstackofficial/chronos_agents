@@ -1,0 +1,29 @@
+# whale_swing / ppo: training config (training.train --model whale_swing --algo ppo)
+# NOTE: steps / eval_every / checkpoint_every count env steps = DECISIONS. One env step is
+# env.decision_minutes[whale_swing] = 15 minutes (training/configs/env.yaml), so they are the old
+# per-minute numbers (10_000_000 / 250_000 / 250_000) divided by 15: the same minutes of market per run.
+# gamma below is per MINUTE; train.py uses gamma ** 15 per decision (algorithm and VecNormalize).
+model: whale_swing
+algo: ppo
+steps: 666667               # decisions (was 10_000_000 minutes)
+n_envs: 8
+eval_every: 16667            # decisions (env steps, summed over all envs) between validation evals
+eval_episodes: 10
+eval_env_overrides:         # merged into env.yaml for the eval env only
+  sampler:
+    length_sessions:
+      whale_swing: [5, 5]            # eval episodes of exactly 5 sessions
+checkpoint_every: 16667       # decisions
+frame_stack: 1
+gamma: 0.999
+net_arch: [256, 256]
+env_overrides: {}           # merged into training/configs/env.yaml (both train and eval env)
+algo_kwargs:
+  learning_rate: 0.0003
+  # n_steps counts decisions per env: 2048 would be 2048 x 15 = 30720 minutes per rollout per env
+  # (hundreds of sessions, a stale on-policy batch). 256 x 8 envs = 2048 decisions per update.
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  gae_lambda: 0.95
+  clip_range: 0.2

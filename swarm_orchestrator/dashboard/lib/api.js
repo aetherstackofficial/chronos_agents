@@ -107,6 +107,25 @@ export const api = {
    *  replay it with replay({csv_path}). 404 = no data (often a missing .NS suffix). */
   replayYahoo: (cfg) => post('/api/replay/yahoo', cfg),
 
+  /** POST /api/replay/handover {at_bar?} → {status, at_bar, bars_replayed}. Hands a replay to the agents. */
+  handover: (atBar) => post('/api/replay/handover', atBar != null ? { at_bar: atBar } : {}),
+
+  /** Market mode (engine started via tools.run_engine_backtest; 501 if it was not).
+   *  GET → {mode: free|backtest, on_tape_end: continue|pause, engine_mode, locked, tape_bars, bars_done, tape_exhausted};
+   *  set({mode?, on_tape_end?}) → same shape; 409 = mode locked after the hand-over. */
+  mode: {
+    get: () => get('/api/mode'),
+    set: (cfg) => post('/api/mode', cfg),
+  },
+
+  /** Market speed — the chart's fast-forward button (tools/sim_speed.py; 501 if the engine lacks it).
+   *  GET → {fast_forward, factor, last_stop}; set({action: "fast_forward", factor?: 2..50} | {action: "normal"}).
+   *  Fast-forward ends by itself at the user's next fill (event {kind:"speed", action:"normal", agent_id}). */
+  speed: {
+    get: () => get('/api/speed'),
+    set: (cfg) => post('/api/speed', cfg),
+  },
+
   /** GET /api/health → {status, engine} */
   health: () => get('/api/health'),
 

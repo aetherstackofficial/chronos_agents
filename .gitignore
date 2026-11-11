@@ -52,3 +52,10 @@ swarm_orchestrator/data/real/
 Banti_Backtesting_Tasks_Explained.pdf
 Chronos_Architecture_and_Change_Report.pdf
 Chronos_Explained_Simply.pdf
+# Training artifacts (rebuilt data, runs, checkpoints) and agent decision logs
+swarm_orchestrator/training/data/parquet/
+swarm_orchestrator/training/runs/
+swarm_orchestrator/logs/thoughts/
+
+# NIFTY-100 1-minute parquet built from the Kaggle dataset (~1.5 GB); rebuild it, do not commit it
+swarm_orchestrator/training/data/parquet_n100/

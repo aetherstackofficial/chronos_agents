@@ -3,24 +3,127 @@
    Pillar-2 front door: write / save / run sandboxed strategies (SDK §10).
    ============================================================================ */
 
-const SDK_TEMPLATE = `from runner.sdk import Strategy
+const SDK_TEMPLATE = `"""Big Block Trader (default example; same as runner/examples/big_block.py).
+
+Sends one big order (PARENT_QTY shares) in one MARKET slice of SLICE_QTY per minute, like a desk working a
+large order: buys when the price is ENTRY_GAP below VWAP, sells short when it is above, buys anyway after
+MAX_WAIT minutes. Exits the same way at +TAKE_PROFIT / -STOP_LOSS / MAX_HOLD minutes, rests, repeats.
+RELIANCE trades ~1.7 crore shares a day, ~28,000 a minute: 100,000 is ~0.6% of the day and each 10,000 slice
+is about a third of a minute's volume. Good for Backtest mode: watch the footprint on the chart (B/S arrows,
+hover for details) and the result on the Results page.
+"""
+from runner.sdk import Strategy
+
 
 class UserStrategy(Strategy):
-    """Buy weakness below VWAP, exit strength above it. Runs as agent STRAT_xxxx."""
+    PARENT_QTY = 100_000     # shares in one big order
+    SLICE_QTY = 10_000       # shares sent each minute
+    WARMUP = 10              # minutes to wait before the first trade
+    ENTRY_GAP = 0.001        # 0.1% away from VWAP = a signal
+    MAX_WAIT = 20            # minutes to wait for a signal before buying anyway
+    TAKE_PROFIT = 0.004      # +0.4% from the average entry price
+    STOP_LOSS = 0.004        # -0.4%
+    MAX_HOLD = 45            # minutes
+    COOLDOWN = 20            # minutes of rest after getting out
+    MAX_EMPTY_SLICES = 5     # give up on a phase after this many slices that fill nothing
 
     def on_start(self, config):
-        self.inventory = 0
+        self.me = config.get("agent_id", "?")
+        self.pos = 0
+        self.phase = "WAIT"          # WAIT -> ENTER -> HOLD -> EXIT -> REST -> WAIT
+        self.side = 0                # +1 long block, -1 short block
+        self.minutes_in_phase = 0
+        self.minutes_seen = 0
+        self.last_minute = None
+        self.entry_cost = 0.0        # money paid (or received) for the block, to get the average entry
+        self.entry_qty = 0
+        self.empty = 0
+        print(f"[big_block] {self.me} ready: {self.PARENT_QTY:,} shares per block, "
+              f"{self.SLICE_QTY:,} per minute")
 
+    # ------------------------------------------------------------------ helpers
+    def _go(self, phase):
+        self.phase, self.minutes_in_phase, self.empty = phase, 0, 0
+
+    def _slice(self, action, qty):
+        return [{"action": action, "type": "MARKET", "qty": int(qty)}]
+
+    # ------------------------------------------------------------------ hooks
     def on_tick(self, state):
-        px, vwap, rsi = state["last_price"], state["vwap"], state["rsi"]
-        if px < vwap * 0.998 and rsi < 35 and self.inventory < 500:
-            return [{"action": "BUY", "type": "MARKET", "qty": 50}]
-        if self.inventory > 0 and (px > vwap * 1.002 or rsi > 65):
-            return [{"action": "SELL", "type": "MARKET", "qty": self.inventory}]
+        minute = state.get("unix_time")
+        if minute is None or minute == self.last_minute or state.get("paused"):
+            return []                # at most one decision per market minute
+        self.last_minute = minute
+        self.minutes_seen += 1
+        self.minutes_in_phase += 1
+
+        px = state.get("last_price") or 0.0
+        vwap = state.get("vwap") or 0.0
+        if px <= 0:
+            return []
+
+        if self.phase == "WAIT":
+            if self.minutes_seen < self.WARMUP or vwap <= 0:
+                return []
+            if px <= vwap * (1 - self.ENTRY_GAP):
+                self.side = +1
+                why = f"price {px:.2f} is below VWAP {vwap:.2f}"
+            elif px >= vwap * (1 + self.ENTRY_GAP):
+                self.side = -1
+                why = f"price {px:.2f} is above VWAP {vwap:.2f}"
+            elif self.minutes_in_phase >= self.MAX_WAIT:
+                self.side = +1
+                why = f"no signal for {self.MAX_WAIT} minutes"
+            else:
+                return []
+            self.entry_cost, self.entry_qty = 0.0, 0
+            print(f"[big_block] {'BUY' if self.side > 0 else 'SELL'} block of {self.PARENT_QTY:,} starts: {why}")
+            self._go("ENTER")
+
+        if self.phase == "ENTER":
+            left = self.PARENT_QTY - abs(self.pos)
+            if left <= 0 or self.empty >= self.MAX_EMPTY_SLICES:
+                avg = self.entry_cost / self.entry_qty if self.entry_qty else px
+                print(f"[big_block] block done: position {self.pos:,} at avg {avg:.2f}")
+                self._go("HOLD")
+                return []
+            self.empty += 1          # reset by on_fill when the slice fills
+            return self._slice("BUY" if self.side > 0 else "SELL", min(self.SLICE_QTY, left))
+
+        if self.phase == "HOLD":
+            avg = self.entry_cost / self.entry_qty if self.entry_qty else px
+            move = self.side * (px - avg) / avg
+            if move >= self.TAKE_PROFIT or move <= -self.STOP_LOSS or self.minutes_in_phase >= self.MAX_HOLD:
+                why = ("take profit" if move >= self.TAKE_PROFIT else
+                       "stop loss" if move <= -self.STOP_LOSS else "time is up")
+                print(f"[big_block] exit starts ({why}): price {px:.2f}, entry {avg:.2f}, "
+                      f"move {move * 100:+.2f}%")
+                self._go("EXIT")
+            else:
+                return []
+
+        if self.phase == "EXIT":
+            if self.pos == 0 or self.empty >= self.MAX_EMPTY_SLICES:
+                print(f"[big_block] out; position {self.pos:,}. Resting {self.COOLDOWN} minutes")
+                self._go("REST")
+                return []
+            self.empty += 1
+            return self._slice("SELL" if self.pos > 0 else "BUY", min(self.SLICE_QTY, abs(self.pos)))
+
+        if self.phase == "REST" and self.minutes_in_phase >= self.COOLDOWN:
+            self._go("WAIT")
         return []
 
     def on_fill(self, ack):
-        self.inventory = ack["pos"]
+        done = int(ack.get("executed_qty") or 0)
+        before, self.pos = self.pos, int(ack.get("pos", self.pos))
+        if done > 0:
+            self.empty = 0
+            if self.phase == "ENTER":
+                self.entry_cost += done * float(ack.get("average_price") or 0.0)
+                self.entry_qty += done
+        print(f"[big_block] {ack.get('status')}: {done:,} @ {ack.get('average_price')} "
+              f"(position {before:,} -> {self.pos:,})")
 `;
 
 const STYLE_ID = 'strat-check-style';
@@ -94,7 +197,7 @@ export default {
             </span>
           </div>
           <div class="editor-toolbar">
-            <input class="input mono" data-role="name" value="mean_rev" aria-label="Strategy name" maxlength="48">
+            <input class="input mono" data-role="name" value="big_block" aria-label="Strategy name" maxlength="48">
             <button type="button" class="btn btn-sm" data-role="check" title="Check the code and dry-run it with sample ticks. Nothing trades.">Check</button>
             <button type="button" class="btn btn-sm" data-role="save">Save to Library</button>
             <button type="button" class="btn btn-primary btn-sm" data-role="saverun">Save &amp; Run</button>
@@ -315,7 +418,7 @@ export default {
     q('new').addEventListener('click', () => {
       setCode(SDK_TEMPLATE);
       setLoaded(null);
-      this._els.name.value = 'mean_rev';
+      this._els.name.value = 'big_block';
     });
 
     /* ---- script library ---- */

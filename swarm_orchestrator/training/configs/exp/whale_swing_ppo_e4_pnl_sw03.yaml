@@ -1,0 +1,34 @@
+# Overnight 2026-11-06 experiment e4_pnl_sw03: whale_swing PPO, K=15, 80k decisions, 3 envs, log_std_init -1.
+model: whale_swing
+algo: ppo
+steps: 80000
+n_envs: 3
+eval_every: 10000
+eval_episodes: 10
+eval_env_overrides:
+  sampler:
+    length_sessions:
+      whale_swing:
+      - 5
+      - 5
+checkpoint_every: 20000
+frame_stack: 1
+gamma: 0.999
+net_arch:
+- 256
+- 256
+env_overrides:
+  rewards:
+    whale:
+      profit_term: pnl
+      w_switch:
+        whale_swing: 0.03
+        whale_position: 0.03
+algo_kwargs:
+  learning_rate: 0.0003
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  gae_lambda: 0.95
+  clip_range: 0.2
+log_std_init: -1.0

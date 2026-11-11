@@ -1,0 +1,25 @@
+# mm / sac: training config (training.train --model mm --algo sac)
+model: mm
+algo: sac
+steps: 1000000
+n_envs: 8
+eval_every: 250000          # env steps (summed over all envs) between validation evals
+eval_episodes: 10
+eval_env_overrides:         # merged into env.yaml for the eval env only
+  sampler:
+    length_sessions:
+      mm: [5, 5]            # eval episodes of exactly 5 sessions
+checkpoint_every: 250000
+frame_stack: 1
+gamma: 0.99
+net_arch: [256, 256]
+env_overrides: {}           # merged into training/configs/env.yaml (both train and eval env)
+algo_kwargs:
+  learning_rate: 0.0003
+  buffer_size: 1000000
+  batch_size: 256
+  tau: 0.005
+  learning_starts: 10000
+  ent_coef: auto
+  train_freq: 1
+  gradient_steps: 4

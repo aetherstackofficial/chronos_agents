@@ -1,0 +1,27 @@
+# Round 2 (NIFTY-100, 102 stocks): whale_swing PPO fine-tuned from behaviour cloning of the band40 rule
+# (minute EMA20/60 trend, 40 bp entry threshold + hysteresis, passive orders). Steps are DECISIONS (K = 15 min).
+model: whale_swing
+algo: ppo
+steps: 400000
+n_envs: 3
+eval_every: 20000
+eval_episodes: 10
+eval_env_overrides:
+  sampler:
+    length_sessions:
+      whale_swing: [5, 5]
+checkpoint_every: 40000
+frame_stack: 1
+gamma: 0.999
+net_arch: [256, 256]
+env_overrides: {}
+obs_scaler: obs_scaler_whale_n100.json
+algo_kwargs:
+  learning_rate: 0.00005
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  gae_lambda: 0.95
+  clip_range: 0.2
+log_std_init: -1.0
+init_log_std: -2.0

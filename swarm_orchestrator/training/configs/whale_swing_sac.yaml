@@ -1,0 +1,29 @@
+# whale_swing / sac: training config (training.train --model whale_swing --algo sac)
+# NOTE: steps / eval_every / checkpoint_every count env steps = DECISIONS. One env step is
+# env.decision_minutes[whale_swing] = 15 minutes (training/configs/env.yaml), so they are the old
+# per-minute numbers (1_000_000 / 250_000 / 250_000) divided by 15: the same minutes of market per run.
+# gamma below is per MINUTE; train.py uses gamma ** 15 per decision (algorithm and VecNormalize).
+model: whale_swing
+algo: sac
+steps: 66667               # decisions (was 1_000_000 minutes)
+n_envs: 8
+eval_every: 16667            # decisions (env steps, summed over all envs) between validation evals
+eval_episodes: 10
+eval_env_overrides:         # merged into env.yaml for the eval env only
+  sampler:
+    length_sessions:
+      whale_swing: [5, 5]            # eval episodes of exactly 5 sessions
+checkpoint_every: 16667       # decisions
+frame_stack: 1
+gamma: 0.999
+net_arch: [256, 256]
+env_overrides: {}           # merged into training/configs/env.yaml (both train and eval env)
+algo_kwargs:
+  learning_rate: 0.0003
+  buffer_size: 1000000
+  batch_size: 256
+  tau: 0.005
+  learning_starts: 667      # decisions (was 10_000 minutes)
+  ent_coef: auto
+  train_freq: 1
+  gradient_steps: 4

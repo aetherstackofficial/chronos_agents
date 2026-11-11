@@ -28,6 +28,16 @@ const trades = [];
  */
 const BAR_CAP = 6000;
 const bars = [];
+
+/**
+ * Every fill of the CURRENT run in which one of the user's strategies took part (buyer or seller id
+ * starting STRAT_ or USER_), oldest first. Kept apart from the 200-trade ring so the chart can mark
+ * all of them; cleared when a new run starts.
+ */
+const MY_CAP = 20000;
+const myTrades = [];
+const USER_PREFIXES = ['STRAT_', 'USER_'];
+const isUser = (id) => typeof id === 'string' && USER_PREFIXES.some((p) => id.startsWith(p));
 let runId = null;
 
 let ws = null;
@@ -103,6 +113,9 @@ export const store = {
    */
   bars() { return bars.slice(); },
 
+  /** @param {number} n @returns the last n one-minute candles of the current run, oldest first (a copy) */
+  barsTail(n) { return bars.slice(-Math.max(1, n)); },
+
   /** @returns {object|null} the most recent tick payload, or null before START */
   latestTick() { return store.state.tick; },
 
@@ -111,6 +124,19 @@ export const store = {
    * @returns {object[]} the last n trade payloads, oldest first
    */
   recentTrades(n = TRADE_RING) { return trades.slice(-n); },
+
+  /** @returns {object[]} every trade of the current run that involved a user strategy, oldest first (a copy) */
+  myTrades() { return myTrades.slice(); },
+
+  /**
+   * @param {object} t a §5.2 trade payload
+   * @returns {{agent:string, side:'BUY'|'SELL', counterparty:string}|null} the user's side of the trade, or null
+   */
+  mySide(t) {
+    if (isUser(t.buyer)) return { agent: t.buyer, side: 'BUY', counterparty: t.seller };
+    if (isUser(t.seller)) return { agent: t.seller, side: 'SELL', counterparty: t.buyer };
+    return null;
+  },
 };
 
 /**
@@ -129,6 +155,7 @@ function dispatch(topic, data) {
       if (hadRun) {
         bars.length = 0;
         trades.length = 0;
+        myTrades.length = 0;
         emit(listeners.reset, data);
       }
     }
@@ -142,6 +169,10 @@ function dispatch(topic, data) {
   } else if (topic === 'trade') {
     trades.push(data);
     if (trades.length > TRADE_RING) trades.splice(0, trades.length - TRADE_RING);
+    if (isUser(data.buyer) || isUser(data.seller)) {
+      myTrades.push(data);
+      if (myTrades.length > MY_CAP) myTrades.splice(0, myTrades.length - MY_CAP);
+    }
     emit(listeners.trade, data);
   } else if (topic === 'event') {
     if (data.kind === 'mode_change' && data.mode) store.state.mode = data.mode;

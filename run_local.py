@@ -88,7 +88,9 @@ class Service:
 
 
 SERVICES = [
-    Service("engine", "module", "engine.server", "36", True, "matching engine"),
+    # tools.run_engine_backtest = engine.server plus the dashboard's market-mode switches
+    # (free market / backtest, and what happens when the replayed data runs out).
+    Service("engine", "module", "tools.run_engine_backtest", "36", True, "matching engine"),
     Service("oracle", "path", "oracle.py", "35", False, "news scoring"),
     Service("swarm", "path", "main.py", "33", False, "AI agents", "Orchestrator online"),
     Service("bridge", "path", "bridge.py", "32", True, "API + dashboard"),
@@ -367,12 +369,17 @@ def main() -> int:
         "CHRONOS_DB": db_path,
         "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
         "TF_CPP_MIN_LOG_LEVEL": "2", "TF_ENABLE_ONEDNN_OPTS": "0",
+        # No Docker here, so no sealed sandbox: let the dashboard run strategies as a plain local
+        # process (runner/sandbox.py). Set CHRONOS_ALLOW_UNSAFE_SANDBOX=0 to refuse instead.
+        "CHRONOS_ALLOW_UNSAFE_SANDBOX": pick("CHRONOS_ALLOW_UNSAFE_SANDBOX", "1"),
     })
     keys = {k: bool(os.environ.get(k) or file_env.get(k)) and "your_" not in (os.environ.get(k) or file_env.get(k, ""))
             for k in ("GEMINI_API_KEY", "GROQ_API_KEY")}
     if any(s.name == "oracle" for s in chosen):
         tiers = [n for n, k in (("Gemini", "GEMINI_API_KEY"), ("Groq", "GROQ_API_KEY")) if keys[k]]
         say(f"oracle : {' -> '.join(tiers + ['word list'])}")
+    if env["CHRONOS_ALLOW_UNSAFE_SANDBOX"].strip().lower() in ("1", "true", "yes", "on"):
+        say("sandbox: strategies run as plain local processes (no Docker); only run code you trust")
     say(f"db     : {db_path}")
     say(f"logs   : {RUN_DIR / 'logs'}")
     say("")

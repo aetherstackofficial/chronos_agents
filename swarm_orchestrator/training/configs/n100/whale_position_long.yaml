@@ -1,0 +1,38 @@
+# Round 3 (NIFTY-100, 102 stocks): whale_position with episodes as long as its holding period.
+# Round 2 traded 5-20-session episodes and was evaluated on 5 sessions with a forced exit at the end,
+# which cut every position after at most a week and charged an exit + delivery cost each time.
+# Here: training episodes of 20-60 sessions, evaluation on 40 sessions, and no forced exit at the
+# last bar (the position is valued at the last price; a drawdown stop still exits). The memory
+# pre-roll is unchanged: half of the episodes start with 120-250 sessions (up to a year) of history.
+# Steps are DECISIONS (K = 75 min). The teacher is chosen on validation by
+# scratchpad teachers.py with TEACH_SESSIONS=40 TEACH_NOCLOSE=1 (rule: best Sharpe, buy-and-hold excluded).
+model: whale_position
+algo: ppo
+steps: 100000
+n_envs: 3
+eval_every: 10000
+eval_episodes: 4
+env_overrides:
+  env:
+    close_at_end: false
+  sampler:
+    length_sessions:
+      whale_position: [20, 60]
+eval_env_overrides:
+  sampler:
+    length_sessions:
+      whale_position: [40, 40]
+checkpoint_every: 10000
+frame_stack: 1
+gamma: 0.9998
+net_arch: [256, 256]
+obs_scaler: obs_scaler_whale_n100.json
+algo_kwargs:
+  learning_rate: 0.00005
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  gae_lambda: 0.95
+  clip_range: 0.2
+log_std_init: -1.0
+init_log_std: -2.0

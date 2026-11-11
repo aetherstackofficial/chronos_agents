@@ -1,0 +1,383 @@
+{
+  "name": "whale_position_long",
+  "model": "whale_position",
+  "role": "whale",
+  "algo": "ppo",
+  "seed": 1,
+  "source_run": "n100_wpL_ppo_bc_s1_selected",
+  "weights": "final",
+  "obs_names": [
+    "vwap_dist",
+    "bar_range",
+    "volume_ratio",
+    "rsi",
+    "order_flow",
+    "mem_hist_avail",
+    "mem_ret_1m",
+    "mem_ret_5m",
+    "mem_ret_15m",
+    "mem_ret_30m",
+    "mem_ret_60m",
+    "mem_ret_1d",
+    "mem_ema20_dist",
+    "mem_ema60_dist",
+    "mem_gap",
+    "mem_from_open",
+    "mem_range_pos_today",
+    "mem_range_pos_5d",
+    "mem_prev_high_dist",
+    "mem_prev_low_dist",
+    "mem_prev_close_dist",
+    "mem_rv30_ratio",
+    "mem_rv_today_ratio",
+    "mem_jump_10m",
+    "mem_vol_same_minute",
+    "mem_vol_today_vs_expected",
+    "mem_ret_5d",
+    "mem_ret_20d",
+    "mem_ret_60d",
+    "mem_ret_120d",
+    "mem_year_range_pos",
+    "mem_year_high_dist_atr",
+    "mem_year_low_dist_atr",
+    "mem_ema50d_dist_atr",
+    "mem_ema200d_dist_atr",
+    "mem_ema50_vs_200_atr",
+    "mem_stock_drawdown",
+    "mem_atr_regime",
+    "mem_volume_regime",
+    "mem_lvl_up1_dist",
+    "mem_lvl_up1_strength",
+    "mem_lvl_up1_touches",
+    "mem_lvl_up1_age",
+    "mem_lvl_up2_dist",
+    "mem_lvl_up2_strength",
+    "mem_lvl_up2_touches",
+    "mem_lvl_up2_age",
+    "mem_lvl_up3_dist",
+    "mem_lvl_up3_strength",
+    "mem_lvl_up3_touches",
+    "mem_lvl_up3_age",
+    "mem_lvl_dn1_dist",
+    "mem_lvl_dn1_strength",
+    "mem_lvl_dn1_touches",
+    "mem_lvl_dn1_age",
+    "mem_lvl_dn2_dist",
+    "mem_lvl_dn2_strength",
+    "mem_lvl_dn2_touches",
+    "mem_lvl_dn2_age",
+    "mem_lvl_dn3_dist",
+    "mem_lvl_dn3_strength",
+    "mem_lvl_dn3_touches",
+    "mem_lvl_dn3_age",
+    "tod_sin",
+    "tod_cos",
+    "to_close",
+    "dow_sin",
+    "dow_cos",
+    "sector_Commodities",
+    "sector_Consumer Discretionary",
+    "sector_Energy",
+    "sector_Fast Moving Consumer Goods",
+    "sector_Financial Services",
+    "sector_Healthcare",
+    "sector_Industrials",
+    "sector_Information Technology",
+    "sector_Services",
+    "sector_Telecommunication",
+    "sector_Utilities",
+    "sector_Diversified",
+    "sector_UNKNOWN",
+    "inventory",
+    "open_pnl",
+    "drawdown",
+    "holding",
+    "pnl_today",
+    "exposure",
+    "last_action_0",
+    "last_action_1",
+    "last_action_2",
+    "cap_vs_adv",
+    "traded_vs_adv",
+    "risk_appetite"
+  ],
+  "n_inputs": 93,
+  "spec_hash": "f93284eec806872f12ef159f8cab55bd0ab6ffef683aad090bdb2ce636bda379",
+  "spec_hash_now": "f93284eec806872f12ef159f8cab55bd0ab6ffef683aad090bdb2ce636bda379",
+  "spec_hash_matches_training": true,
+  "outputs": [
+    "target",
+    "participation",
+    "aggressiveness"
+  ],
+  "output_meaning": [
+    "target position in [-1, 1] x capacity (entry/exit band in action_decode)",
+    "participation: linear [-1, 1] -> [participation_min, participation_max]",
+    "aggressiveness: linear [-1, 1] -> [0, 1] (1 = through the opposite touch)"
+  ],
+  "frame_stack": 1,
+  "clip_obs": 10.0,
+  "obs_scaler": {
+    "file": "obs_scaler.json",
+    "sha256": "93ef2b8b13e555506c02314743c19a1dca398cd89f07691d6e53bcc5b711098f",
+    "spec_hash": "f93284eec806872f12ef159f8cab55bd0ab6ffef683aad090bdb2ce636bda379",
+    "n_samples": 200023,
+    "fit_date": "2026-11-07T13:51:38",
+    "clip": 10.0,
+    "obs_normalisation": "fixed per-input scaler; vecnormalize.pkl holds reward statistics only"
+  },
+  "gamma": 0.9998,
+  "net_arch": [
+    256,
+    256
+  ],
+  "git_commit": null,
+  "libraries": {
+    "python": "3.13.18",
+    "platform": "Linux-6.18.55+-x86_64-with-glibc2.39",
+    "stable_baselines3": "2.9.2",
+    "gymnasium": "1.2.0",
+    "torch": "2.11.0+cpu",
+    "numpy": "2.1.3",
+    "pandas": "2.3.3",
+    "pyarrow": "23.0.1",
+    "yaml": "6.0.3"
+  },
+  "dataset_manifest_sha256": null,
+  "trained_timesteps": null,
+  "train_start": null,
+  "train_end": "2026-11-10T10:51:19",
+  "exported_at": "2026-11-10T19:54:23",
+  "eval": {
+    "eval_test": {
+      "split": "test",
+      "episodes": 100,
+      "cost_mult": null,
+      "stocks": null,
+      "metrics": {
+        "episodes": 100,
+        "profit_after_costs_mean": -425119.245053136,
+        "profit_after_costs_total": -42511924.505313605,
+        "return_mean": -0.010237475461868723,
+        "sharpe_per_session_annualised": -0.4582262419225935,
+        "session_return_mean": -0.0002470716802140627,
+        "sessions": 4000,
+        "worst_drawdown": 0.1611683816748226,
+        "mean_drawdown": 0.04605713227361221,
+        "turnover_per_session": 0.08533277252865132,
+        "reward_parts_mean_per_episode": {
+          "drawdown": -0.016426143378408625,
+          "inaction": 0.0,
+          "profit": -0.0011477935727682107,
+          "switch": 0.0,
+          "termination": 0.0
+        },
+        "share_in_position": 0.42425095006333763,
+        "mean_holding_sessions": 11.94993427230047,
+        "n_positions": 142,
+        "share_long": 0.4237009133942264,
+        "share_short": 0.000550036669111274,
+        "long_share_of_time_in_position": 0.9987035110492289,
+        "participation_used": 0.05002084002066992
+      },
+      "checks": [
+        {
+          "name": "outputs_not_stuck",
+          "passed": false,
+          "value": {
+            "output_0": 0.16851846875433116,
+            "output_1": 0.0008167296354323392,
+            "output_2": 0.0007414739196295811
+          }
+        },
+        {
+          "name": "whale_trades_long_and_short_and_varies",
+          "passed": false,
+          "value": {
+            "share_long": 0.4237009133942264,
+            "share_short": 0.000550036669111274,
+            "position_std": 0.1677721458474234
+          }
+        },
+        {
+          "name": "no_input_at_clip_over_1pct",
+          "passed": false,
+          "value": {
+            "worst_share": 0.0215,
+            "worst_inputs": {
+              "open_pnl": 0.0215,
+              "mem_gap": 0.00375,
+              "volume_ratio": 0.002,
+              "mem_from_open": 0.0014,
+              "mem_prev_close_dist": 0.00115
+            }
+          }
+        },
+        {
+          "name": "no_constant_input",
+          "passed": true,
+          "value": {
+            "constant_inputs": []
+          }
+        },
+        {
+          "name": "few_memory_sessions_not_wild",
+          "passed": false,
+          "value": {
+            "turnover_per_session": {
+              "low_M": 0.0,
+              "high_M": 0.11616156257298402,
+              "ratio": 0.0
+            },
+            "max_drawdown": {
+              "low_M": 0.0,
+              "high_M": 0.05935316141870276,
+              "ratio": 0.0
+            }
+          }
+        },
+        {
+          "name": "memory_used_in_top5_reasons",
+          "passed": true,
+          "value": {
+            "share_of_decisions_with_mem_input_in_top5": 0.99875,
+            "share_of_top5_slots_that_are_mem": 0.6875,
+            "n_decisions": 800
+          }
+        },
+        {
+          "name": "whale_position_change_near_strong_levels",
+          "passed": null,
+          "value": {
+            "mean_abs_position_change_near": 0.017193871147299578,
+            "mean_abs_position_change_elsewhere": 0.017014665514856316,
+            "steps_near": 5791,
+            "steps_elsewhere": 14209,
+            "ratio": 1.010532421709189
+          }
+        }
+      ],
+      "checks_failed": [
+        "outputs_not_stuck",
+        "whale_trades_long_and_short_and_varies",
+        "no_input_at_clip_over_1pct",
+        "few_memory_sessions_not_wild"
+      ]
+    },
+    "eval_validation": {
+      "split": "validation",
+      "episodes": 30,
+      "cost_mult": null,
+      "stocks": null,
+      "metrics": {
+        "episodes": 30,
+        "profit_after_costs_mean": 310494.367622557,
+        "profit_after_costs_total": 9314831.02867671,
+        "return_mean": 0.04075009568937168,
+        "sharpe_per_session_annualised": 1.2900671144124176,
+        "session_return_mean": 0.000977956541692268,
+        "sessions": 1200,
+        "worst_drawdown": 0.18206091804456137,
+        "mean_drawdown": 0.0512609462351895,
+        "turnover_per_session": 0.0619993626743196,
+        "reward_parts_mean_per_episode": {
+          "drawdown": -0.022247162686909978,
+          "inaction": 0.0,
+          "profit": 0.0006996532060038012,
+          "switch": 0.0,
+          "termination": 0.0
+        },
+        "share_in_position": 0.574164944329622,
+        "mean_holding_sessions": 21.52975,
+        "n_positions": 32,
+        "share_long": 0.5739982665511033,
+        "share_short": 0.0001666777785185679,
+        "long_share_of_time_in_position": 0.9997097040142128,
+        "participation_used": 0.05002357692985779
+      },
+      "checks": [
+        {
+          "name": "outputs_not_stuck",
+          "passed": false,
+          "value": {
+            "output_0": 0.1209106092467762,
+            "output_1": 0.0008006771000795801,
+            "output_2": 0.0007216449569668603
+          }
+        },
+        {
+          "name": "whale_trades_long_and_short_and_varies",
+          "passed": false,
+          "value": {
+            "share_long": 0.5739982665511033,
+            "share_short": 0.0001666777785185679,
+            "position_std": 0.1180080855666661
+          }
+        },
+        {
+          "name": "no_input_at_clip_over_1pct",
+          "passed": false,
+          "value": {
+            "worst_share": 0.0915,
+            "worst_inputs": {
+              "open_pnl": 0.0915,
+              "mem_ret_60d": 0.012833333333333334,
+              "mem_atr_regime": 0.0125,
+              "mem_gap": 0.004166666666666667,
+              "volume_ratio": 0.002
+            }
+          }
+        },
+        {
+          "name": "no_constant_input",
+          "passed": true,
+          "value": {
+            "constant_inputs": []
+          }
+        },
+        {
+          "name": "few_memory_sessions_not_wild",
+          "passed": false,
+          "value": {
+            "turnover_per_session": {
+              "low_M": 0.0,
+              "high_M": 0.09088221207411977,
+              "ratio": 0.0
+            },
+            "max_drawdown": {
+              "low_M": 0.0,
+              "high_M": 0.05815674104374586,
+              "ratio": 0.0
+            }
+          }
+        },
+        {
+          "name": "memory_used_in_top5_reasons",
+          "passed": true,
+          "value": {
+            "share_of_decisions_with_mem_input_in_top5": 1.0,
+            "share_of_top5_slots_that_are_mem": 0.7149999999999999,
+            "n_decisions": 240
+          }
+        },
+        {
+          "name": "whale_position_change_near_strong_levels",
+          "passed": null,
+          "value": {
+            "mean_abs_position_change_near": 0.011110248238950215,
+            "mean_abs_position_change_elsewhere": 0.012933038763209868,
+            "steps_near": 1755,
+            "steps_elsewhere": 4245,
+            "ratio": 0.8590593782611341
+          }
+        }
+      ],
+      "checks_failed": [
+        "outputs_not_stuck",
+        "whale_trades_long_and_short_and_varies",
+        "no_input_at_clip_over_1pct",
+        "few_memory_sessions_not_wild"
+      ]
+    }
+  }
+}

@@ -1,0 +1,208 @@
+model: whale_position
+algo: ppo
+steps: 100000
+n_envs: 3
+eval_every: 5000
+eval_episodes: 10
+eval_env_overrides:
+  sampler:
+    length_sessions:
+      whale_position:
+      - 5
+      - 5
+checkpoint_every: 10000
+frame_stack: 1
+gamma: 0.9995
+net_arch:
+- 256
+- 256
+env_overrides: {}
+obs_scaler: /kaggle/working/src/swarm_orchestrator/training/configs/obs_scaler_whale_n100.json
+algo_kwargs:
+  learning_rate: 5.0e-05
+  n_steps: 256
+  batch_size: 256
+  n_epochs: 10
+  gae_lambda: 0.95
+  clip_range: 0.2
+log_std_init: -1.0
+init_log_std: -2.0
+init_from: training/runs/n100_bc_whale_position/bc_policy.pt
+seed: 1
+role: whale
+decision_minutes: 75
+gamma_per_minute: 0.9995
+gamma_per_decision: 0.9631853848044039
+env_cfg:
+  costs:
+    intraday_rt_bps: 3.55
+    delivery_rt_bps: 22.0
+    cost_mult_range:
+    - 0.5
+    - 1.5
+  sampler:
+    length_sessions:
+      whale_swing:
+      - 1
+      - 5
+      whale_position:
+      - 5
+      - 20
+      mm:
+      - 1
+      - 5
+    memory_mix:
+    - - 0.05
+      - 0
+      - 0
+    - - 0.2
+      - 1
+      - 19
+    - - 0.25
+      - 20
+      - 119
+    - - 0.5
+      - 120
+      - 250
+    adv_sessions: 20
+    whale_capacity_adv_frac:
+    - 0.0005
+    - 0.03
+    mm_capacity_adv_frac:
+    - 0.0002
+    - 0.005
+    mm_quote_divisor: 5
+    mm_capital_multiple: 2.0
+    risk_tolerance_range:
+    - 0.03
+    - 0.15
+    order_delay_choices:
+    - 0
+    - 1
+    lp_size_range:
+    - 0.5
+    - 1.5
+  env:
+    obs_noise: 0.05
+    obs_noise_mode: relative
+    dd_terminate:
+      whale_swing: 0.3
+      whale_position: 0.3
+      mm: 0.5
+    decision_minutes:
+      whale_swing: 15
+      whale_position: 75
+      mm: 1
+  rewards:
+    whale:
+      profit_term: dsr
+      eta:
+        whale_swing: 0.0026666667
+        whale_position: 0.00026666667
+      dsr_var_floor: 1.0e-08
+      dsr_clip: 10.0
+      pnl_scale: 10.0
+      w_dd: 1.0
+      dd_free: 0.05
+      dd_step_scale:
+        whale_swing: 0.0026666667
+        whale_position: 0.00026666667
+      w_term: 1.0
+      w_flat: 0.0
+      flat_fraction: 0.05
+      w_switch:
+        whale_swing: 0.0
+        whale_position: 0.0
+    mm:
+      reward_scale: 10000.0
+      w_inv: 0.05
+      inv_penalty_ticks: 20.0
+      w_up: 0.05
+      w_term: 100.0
+eval_env_cfg:
+  costs:
+    intraday_rt_bps: 3.55
+    delivery_rt_bps: 22.0
+    cost_mult_range:
+    - 0.5
+    - 1.5
+  sampler:
+    length_sessions:
+      whale_swing:
+      - 1
+      - 5
+      whale_position:
+      - 5
+      - 5
+      mm:
+      - 1
+      - 5
+    memory_mix:
+    - - 0.05
+      - 0
+      - 0
+    - - 0.2
+      - 1
+      - 19
+    - - 0.25
+      - 20
+      - 119
+    - - 0.5
+      - 120
+      - 250
+    adv_sessions: 20
+    whale_capacity_adv_frac:
+    - 0.0005
+    - 0.03
+    mm_capacity_adv_frac:
+    - 0.0002
+    - 0.005
+    mm_quote_divisor: 5
+    mm_capital_multiple: 2.0
+    risk_tolerance_range:
+    - 0.03
+    - 0.15
+    order_delay_choices:
+    - 0
+    - 1
+    lp_size_range:
+    - 0.5
+    - 1.5
+  env:
+    obs_noise: 0
+    obs_noise_mode: relative
+    dd_terminate:
+      whale_swing: 0.3
+      whale_position: 0.3
+      mm: 0.5
+    decision_minutes:
+      whale_swing: 15
+      whale_position: 75
+      mm: 1
+  rewards:
+    whale:
+      profit_term: dsr
+      eta:
+        whale_swing: 0.0026666667
+        whale_position: 0.00026666667
+      dsr_var_floor: 1.0e-08
+      dsr_clip: 10.0
+      pnl_scale: 10.0
+      w_dd: 1.0
+      dd_free: 0.05
+      dd_step_scale:
+        whale_swing: 0.0026666667
+        whale_position: 0.00026666667
+      w_term: 1.0
+      w_flat: 0.0
+      flat_fraction: 0.05
+      w_switch:
+        whale_swing: 0.0
+        whale_position: 0.0
+    mm:
+      reward_scale: 10000.0
+      w_inv: 0.05
+      inv_penalty_ticks: 20.0
+      w_up: 0.05
+      w_term: 100.0
+run_dir: /kaggle/working/src/swarm_orchestrator/training/runs/n100_whale_position_ppo_bc_s1

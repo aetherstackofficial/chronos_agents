@@ -41,7 +41,7 @@ BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 CHRONOS_DB = os.getenv("CHRONOS_DB", "chronos.db")
 
 CONTROL_TIMEOUT, HEALTH_TIMEOUT = 3.0, 1.5
-WS_QUEUE_MAX, MAX_EQUITY_POINTS = 500, 5000
+WS_QUEUE_MAX, MAX_EQUITY_POINTS = 2000, 5000   # 2000: room for fast-forward bursts (ticks + trades), so no tick is dropped
 
 _ctx: Optional[zmq.asyncio.Context] = None
 _sub: Optional[zmq.asyncio.Socket] = None
@@ -342,6 +342,78 @@ async def replay_handover(req: HandoverReq) -> dict:
     if ack.get("status") == "REJECTED":
         raise HTTPException(status_code=409, detail=ack.get("reason", "HANDOVER rejected"))
     return {"status": ack.get("status"), "at_bar": ack.get("at_bar"), "bars_replayed": ack.get("bars_replayed")}
+
+
+class ModeReq(BaseModel):
+    mode: Optional[str] = None          # "free" | "backtest"
+    on_tape_end: Optional[str] = None   # "continue" | "pause"
+
+
+_MODE_KEYS = ("mode", "on_tape_end", "engine_mode", "locked", "tape_bars", "bars_done", "tape_exhausted")
+
+
+async def _mode_request(msg: dict) -> dict:
+    """Market-mode switches of the engine (agents/backtest_mode.py, started via tools.run_engine_backtest)."""
+    if not (ack := await _control_request(msg)):
+        raise HTTPException(status_code=502, detail="engine did not acknowledge BT_MODE")
+    if ack.get("status") == "REJECTED":
+        reason = ack.get("reason") or "mode change rejected"
+        if "unknown msg type" in reason:
+            raise HTTPException(status_code=501, detail="this engine has no mode switches; start it with "
+                                                        "`python -m tools.run_engine_backtest` (run_local.py does)")
+        raise HTTPException(status_code=409, detail=reason)
+    return {k: ack.get(k) for k in _MODE_KEYS}
+
+
+@app.get("/api/mode")
+async def mode_get() -> dict:
+    """Current market mode: {mode, on_tape_end, engine_mode, locked, tape_bars, bars_done, tape_exhausted}."""
+    return await _mode_request({"msg": "BT_MODE"})
+
+
+@app.post("/api/mode")
+async def mode_set(req: ModeReq) -> dict:
+    """Set the market mode (only before the market hands over to the agents) and/or the tape-end policy."""
+    msg = {"msg": "BT_MODE"}
+    if req.mode is not None: msg["mode"] = req.mode
+    if req.on_tape_end is not None: msg["on_tape_end"] = req.on_tape_end
+    return await _mode_request(msg)
+
+
+class SpeedReq(BaseModel):
+    action: Optional[str] = None        # "fast_forward" | "normal"
+    factor: Optional[int] = None        # fast_forward only, 2..50 (default 20)
+
+
+_SPEED_KEYS = ("fast_forward", "factor", "last_stop")
+
+
+async def _speed_request(msg: dict) -> dict:
+    """The chart's fast-forward button (tools/sim_speed.py, started via tools.run_engine_backtest)."""
+    if not (ack := await _control_request(msg)):
+        raise HTTPException(status_code=502, detail="engine did not acknowledge SPEED")
+    if ack.get("status") == "REJECTED":
+        reason = ack.get("reason") or "speed change rejected"
+        if "unknown msg type" in reason:
+            raise HTTPException(status_code=501, detail="this engine has no fast-forward; start it with "
+                                                        "`python -m tools.run_engine_backtest` (run_local.py does)")
+        raise HTTPException(status_code=400, detail=reason)
+    return {k: ack.get(k) for k in _SPEED_KEYS}
+
+
+@app.get("/api/speed")
+async def speed_get() -> dict:
+    """Market speed: {fast_forward, factor, last_stop}."""
+    return await _speed_request({"msg": "SPEED"})
+
+
+@app.post("/api/speed")
+async def speed_set(req: SpeedReq) -> dict:
+    """Fast-forward (``factor`` times faster until the user's next trade) or back to normal speed."""
+    msg = {"msg": "SPEED"}
+    if req.action is not None: msg["action"] = req.action
+    if req.factor is not None: msg["factor"] = req.factor
+    return await _speed_request(msg)
 
 @app.post("/api/strategy/run")
 async def strategy_run(req: StrategyRunReq) -> dict:

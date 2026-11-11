@@ -32,6 +32,9 @@ function rgba(hex, a) {
 
 function lc() { return window.LightweightCharts || null; }
 
+const DEFAULT_BAR_SPACING = 6;   // lightweight-charts' own default, px per candle
+const FIT_MIN_BARS = 60;         // candleChart.setData fits the view only with at least this many candles
+
 /** Shared chart options — the single source of chart theming. */
 function baseOptions(extra = {}) {
   const LC = lc();
@@ -64,6 +67,7 @@ function chartUnavailable(el) {
   el.innerHTML = '<div class="chart-offline">chart library unavailable — check network and reload</div>';
   return {
     update() {}, setData() {}, dispose() { el.innerHTML = ''; }, crosshairReadout() {}, chart: null,
+    setMarkers() {}, hover() {}, priceToY() { return null; },
   };
 }
 
@@ -120,12 +124,21 @@ export function candleChart(el) {
       candles.update({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close });
       vol.update(volPoint(b));
     },
-    setData(bars) {
+    /** @param {object[]} bars @param {{fit?: boolean}} [opts] fit=false keeps the zoom and jumps to the newest candle */
+    setData(bars, opts = {}) {
       const bs = bars.map(norm);
       lastBar = bs[bs.length - 1] || null;
       candles.setData(bs.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
       vol.setData(bs.map(volPoint));
-      chart.timeScale().fitContent();
+      // Fitting a handful of candles stretches each one across the panel (bar spacing ~130 px), and that zoom
+      // then sticks while new candles arrive, so most of the run scrolls off to the left. Fit only a real
+      // history; otherwise keep the normal spacing and follow the newest candle.
+      if (opts.fit === false) chart.timeScale().scrollToRealTime();
+      else if (bs.length >= FIT_MIN_BARS) chart.timeScale().fitContent();
+      else {
+        chart.timeScale().applyOptions({ barSpacing: DEFAULT_BAR_SPACING });
+        chart.timeScale().scrollToRealTime();
+      }
     },
     /** fn(bar|null): hovered OHLCV, or null when the pointer leaves the plot. */
     crosshairReadout(fn) {
@@ -136,6 +149,26 @@ export function candleChart(el) {
         fn(c ? { time: param.time, open: c.open, high: c.high, low: c.low, close: c.close, volume: v ? v.value : null } : null);
       });
     },
+    /**
+     * Arrows on candles (lightweight-charts series markers), e.g. the user's own trades.
+     * @param {{time:number, side:'BUY'|'SELL', text?:string}[]} marks — any order; sorted here
+     */
+    setMarkers(marks) {
+      const sorted = [...marks].sort((a, b) => a.time - b.time);
+      candles.setMarkers(sorted.map((m) => (m.side === 'BUY'
+        ? { time: m.time, position: 'belowBar', shape: 'arrowUp', color: up, text: m.text || '' }
+        : { time: m.time, position: 'aboveBar', shape: 'arrowDown', color: down, text: m.text || '' })));
+    },
+    /** fn({time, x, y, close}|null): the hovered candle and the pointer position inside the chart, or null. */
+    hover(fn) {
+      chart.subscribeCrosshairMove((param) => {
+        if (!param || param.time === undefined || !param.point) { fn(null); return; }
+        const c = param.seriesData.get(candles);
+        fn({ time: param.time, x: param.point.x, y: param.point.y, close: c ? c.close : null });
+      });
+    },
+    /** Pixel y of a price on the candle scale (null if off-scale). */
+    priceToY(price) { return candles.priceToCoordinate(price); },
     dispose() { chart.remove(); },
   };
 }

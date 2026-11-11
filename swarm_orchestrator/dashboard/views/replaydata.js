@@ -26,6 +26,8 @@ const CSS = `
 .rd-form label.rd-stock{width:230px}
 .rd-form label.rd-wide{width:280px}
 .rd-form label.rd-num{width:100px}
+.rd-form label.rd-mode{width:420px;max-width:100%}
+.rd-form label.rd-end{width:240px;max-width:100%}
 .rd-form label[hidden]{display:none}
 .rd-note{color:var(--text-dim);font-size:var(--fs-xs)}
 .rd-msg{font-size:var(--fs-sm);white-space:pre-wrap}
@@ -100,11 +102,37 @@ export default {
     </label>
   </div>
 
+  <!-- Market mode: chosen before a replay starts (agents/backtest_mode.py via /api/mode). -->
+  <section class="card rd-card" aria-labelledby="rd-m-title">
+    <h3 id="rd-m-title">${ic(ctx, 'candles')} Market mode</h3>
+    <p>Choose the mode before you start a replay. It decides what happens once one of your orders
+       fills (or you hand over): in <strong>Free market</strong> the real data stops and the agents make
+       the price; in <strong>Backtest</strong> the real data keeps playing and your orders shift it by
+       their footprint (market impact), with the agents trading alongside.</p>
+    <div class="rd-form">
+      <label class="field rd-mode">Mode
+        <select class="select" id="rd-mode" aria-label="Market mode">
+          <option value="free">Free market (agents set the price)</option>
+          <option value="backtest">Backtest (real data + your impact)</option>
+        </select>
+      </label>
+      <label class="field rd-end">When the data runs out
+        <select class="select" id="rd-tapeend" aria-label="When the data runs out">
+          <option value="continue">Continue with the agents</option>
+          <option value="pause">Pause the market</option>
+        </select>
+      </label>
+      <button class="btn" id="rd-handover-btn" title="Stop the history now and let the agents trade on">Hand over to agents now</button>
+    </div>
+    <div class="rd-note" id="rd-mode-status" role="status" aria-live="polite">Checking the engine…</div>
+  </section>
+
   <div class="card rd-banner" id="rd-banner" hidden>
     <strong>Replay started.</strong>
     <p>Watch it on the <a href="#/market">Market</a> page. The moment one of your strategies'
-       orders fills, the engine latches to <span class="chip reactive">REACTIVE</span> permanently
-       and history stops. Go to <a href="#/strategies">Strategies</a> to trade.</p>
+       orders fills, the engine switches to <span class="chip reactive">REACTIVE</span> for good:
+       in Free market mode the history stops and the agents make the price; in Backtest mode the
+       history keeps playing with your footprint. Go to <a href="#/strategies">Strategies</a> to trade.</p>
   </div>
 
   <!-- Source 1: pick a stock, bring its data from Yahoo Finance. -->
@@ -201,6 +229,7 @@ export default {
         show(`${describe(saved)}\nReplay started (run ${res.run_id ?? '?'}, ${res.bars ?? saved.bars} bars).`, 'ok');
         ctx.ui.toast(`Replay started — ${res.bars ?? saved.bars} bars`, 'good');
         $('#rd-banner').hidden = false;
+        refreshMode();
       } catch (e) {
         // textContent (via show): the server text is never interpreted as HTML.
         show(`${step} failed: ${(e && e.message) || e}`, 'err');
@@ -210,6 +239,69 @@ export default {
         btn.disabled = !canRun();
       }
     };
+
+    // ---- Market mode --------------------------------------------------------
+    const modeSel = $('#rd-mode');
+    const endSel = $('#rd-tapeend');
+    const hoBtn = $('#rd-handover-btn');
+    const modeStatus = $('#rd-mode-status');
+    const MODE_NAME = { free: 'Free market', backtest: 'Backtest' };
+    let modeBusy = false;
+    const setModeControls = (enabled) => { modeSel.disabled = endSel.disabled = !enabled; };
+
+    /** Read the engine's mode and show it; called on mount, every 5 s and after each change. */
+    const refreshMode = async () => {
+      if (modeBusy || !state) return;
+      try {
+        const m = await ctx.api.mode.get();
+        modeSel.value = m.mode;
+        endSel.value = m.on_tape_end;
+        endSel.disabled = false;
+        modeSel.disabled = !!m.locked;
+        hoBtn.disabled = m.engine_mode !== 'REPLAY';
+        let txt = `Now: ${MODE_NAME[m.mode] || m.mode}; engine ${m.engine_mode}`;
+        if (m.tape_bars) txt += `; ${Number(m.bars_done).toLocaleString()} of ${Number(m.tape_bars).toLocaleString()} bars of data played`;
+        if (m.tape_exhausted) txt += m.on_tape_end === 'continue'
+          ? '. The data has run out: the agents carry on trading.'
+          : '. The data has run out: the market is paused.';
+        if (m.locked) txt += '. The mode is fixed for this run; start a new replay to change it.';
+        modeStatus.textContent = txt;
+      } catch (e) {
+        setModeControls(false);
+        hoBtn.disabled = true;
+        modeStatus.textContent = (e && e.status === 501)
+          ? 'Mode switches are unavailable: the engine was started without them (use run_local.py, or python -m tools.run_engine_backtest).'
+          : `Could not read the market mode: ${(e && e.message) || e}`;
+      }
+    };
+
+    const changeMode = async (cfg) => {
+      modeBusy = true;
+      try {
+        await ctx.api.mode.set(cfg);
+        ctx.ui.toast(cfg.mode ? `Mode: ${MODE_NAME[cfg.mode]}` : 'Saved', 'good');
+      } catch (e) {
+        ctx.ui.toast(`Could not change the mode: ${(e && e.message) || e}`, 'bad');
+      } finally {
+        modeBusy = false;
+        refreshMode();
+      }
+    };
+    modeSel.addEventListener('change', () => changeMode({ mode: modeSel.value }));
+    endSel.addEventListener('change', () => changeMode({ on_tape_end: endSel.value }));
+    hoBtn.addEventListener('click', async () => {
+      hoBtn.disabled = true;
+      try {
+        const r = await ctx.api.handover();
+        ctx.ui.toast(`Handed over to the agents after ${r.bars_replayed ?? '?'} bars`, 'good');
+      } catch (e) {
+        ctx.ui.toast(`Hand-over failed: ${(e && e.message) || e}`, 'bad');
+      } finally {
+        refreshMode();
+      }
+    });
+    refreshMode();
+    state.timer = setInterval(refreshMode, 5000);
 
     // ---- Source 1: Yahoo ----------------------------------------------------
     const stockSel = $('#rd-stock');
@@ -265,6 +357,7 @@ export default {
 
   unmount() {
     if (!state) return;
+    if (state.timer) clearInterval(state.timer);
     if (state.el) state.el.innerHTML = '';
     state = null;
   },

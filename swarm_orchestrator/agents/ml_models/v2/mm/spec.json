@@ -1,0 +1,354 @@
+{
+  "name": "mm",
+  "model": "mm",
+  "role": "mm",
+  "algo": "ppo",
+  "seed": 1,
+  "source_run": "n100_mm_ppo_bc_s1_selected",
+  "weights": "final",
+  "obs_names": [
+    "vwap_dist",
+    "bar_range",
+    "volume_ratio",
+    "rsi",
+    "order_flow",
+    "mem_hist_avail",
+    "mem_ret_1m",
+    "mem_ret_5m",
+    "mem_ret_15m",
+    "mem_ret_30m",
+    "mem_ret_60m",
+    "mem_ret_1d",
+    "mem_ema20_dist",
+    "mem_ema60_dist",
+    "mem_gap",
+    "mem_from_open",
+    "mem_range_pos_today",
+    "mem_range_pos_5d",
+    "mem_prev_high_dist",
+    "mem_prev_low_dist",
+    "mem_prev_close_dist",
+    "mem_rv30_ratio",
+    "mem_rv_today_ratio",
+    "mem_jump_10m",
+    "mem_vol_same_minute",
+    "mem_vol_today_vs_expected",
+    "mem_atr_regime",
+    "mem_volume_regime",
+    "mem_lvl_up1_dist",
+    "mem_lvl_up1_strength",
+    "mem_lvl_up1_touches",
+    "mem_lvl_up1_age",
+    "mem_lvl_dn1_dist",
+    "mem_lvl_dn1_strength",
+    "mem_lvl_dn1_touches",
+    "mem_lvl_dn1_age",
+    "tod_sin",
+    "tod_cos",
+    "to_close",
+    "dow_sin",
+    "dow_cos",
+    "sector_Commodities",
+    "sector_Consumer Discretionary",
+    "sector_Energy",
+    "sector_Fast Moving Consumer Goods",
+    "sector_Financial Services",
+    "sector_Healthcare",
+    "sector_Industrials",
+    "sector_Information Technology",
+    "sector_Services",
+    "sector_Telecommunication",
+    "sector_Utilities",
+    "sector_Diversified",
+    "sector_UNKNOWN",
+    "inventory",
+    "open_pnl",
+    "drawdown",
+    "holding",
+    "pnl_today",
+    "exposure",
+    "last_action_0",
+    "last_action_1",
+    "last_action_2",
+    "last_action_3"
+  ],
+  "n_inputs": 64,
+  "spec_hash": "83a779710e047f2cf75f80a5717501211147529df84967a9ae5b00a154848652",
+  "spec_hash_now": "83a779710e047f2cf75f80a5717501211147529df84967a9ae5b00a154848652",
+  "spec_hash_matches_training": true,
+  "outputs": [
+    "bid_offset",
+    "ask_offset",
+    "bid_size",
+    "ask_size"
+  ],
+  "output_meaning": [
+    "bid offset: linear [-1, 1] -> integer ticks [mm_offset_min, mm_offset_max] behind the best bid",
+    "ask offset: same, in front of the best ask",
+    "bid size: linear [-1, 1] -> [0, max_quote_size] shares",
+    "ask size: same"
+  ],
+  "frame_stack": 1,
+  "clip_obs": 10.0,
+  "obs_scaler": {
+    "file": "obs_scaler.json",
+    "sha256": "ec2ac007a15754b93695bb99e22d5a33f008efd6b1bdd1b1d22c41c52b9c4ee3",
+    "spec_hash": "83a779710e047f2cf75f80a5717501211147529df84967a9ae5b00a154848652",
+    "n_samples": 200400,
+    "fit_date": "2026-11-07T09:06:03",
+    "clip": 10.0,
+    "obs_normalisation": "fixed per-input scaler; vecnormalize.pkl holds reward statistics only"
+  },
+  "gamma": 0.99,
+  "net_arch": [
+    256,
+    256
+  ],
+  "git_commit": null,
+  "libraries": {
+    "python": "3.13.18",
+    "platform": "Linux-6.18.55+-x86_64-with-glibc2.39",
+    "stable_baselines3": "2.9.2",
+    "gymnasium": "1.2.0",
+    "torch": "2.11.0+cpu",
+    "numpy": "2.1.3",
+    "pandas": "2.3.3",
+    "pyarrow": "23.0.1",
+    "yaml": "6.0.3"
+  },
+  "dataset_manifest_sha256": null,
+  "trained_timesteps": 2002944,
+  "train_start": "2026-11-07T09:08:19",
+  "train_end": "2026-11-07T10:40:15",
+  "exported_at": "2026-11-07T21:44:33",
+  "eval": {
+    "eval_test": {
+      "split": "test",
+      "episodes": 50,
+      "cost_mult": null,
+      "stocks": null,
+      "metrics": {
+        "episodes": 50,
+        "profit_after_costs_mean": -125865.06843786452,
+        "profit_after_costs_total": -6293253.421893226,
+        "return_mean": -0.009741764825435434,
+        "sharpe_per_session_annualised": -11.630411560470671,
+        "session_return_mean": -0.001958389323813592,
+        "sessions": 250,
+        "worst_drawdown": 0.034911636069297806,
+        "mean_drawdown": 0.011548717388004117,
+        "turnover_per_session": 14.09314279704764,
+        "reward_parts_mean_per_episode": {
+          "cost": -78.71160371776186,
+          "inventory": -7.686631849659078,
+          "spread_markout": -15.13694180966057,
+          "termination": 0.0,
+          "uptime": 39.18117282852688
+        },
+        "pnl_spread_markout_total": -4441172.667170783,
+        "pnl_inventory_total": -1852080.7547224434,
+        "fees_total": 3613107.4521707725,
+        "n_fills": 54455,
+        "shares_traded": 27458153.0,
+        "spread_captured_per_round_trip": 1.1609041380168563,
+        "spread_captured_per_round_trip_ticks": 1.1609041380168563,
+        "abs_inventory_mean": 0.19724417590938714,
+        "abs_inventory_max": 0.9589722337339411,
+        "minutes_to_return_to_zero_mean": 14.476802683063164,
+        "excursions_total": 5405,
+        "excursions_returned_share": 0.9929694727104533,
+        "adverse_selection_1m_per_share": 0.6106094220904076,
+        "adverse_selection_1m_per_share_ticks": 0.6106094220904076,
+        "share_quoted_any": 1.0,
+        "share_quoted_both": 0.9998399146211312
+      },
+      "checks": [
+        {
+          "name": "outputs_not_stuck",
+          "passed": true,
+          "value": {
+            "output_0": 0.19563739467099542,
+            "output_1": 0.3477827890161301,
+            "output_2": 0.19759276956948946,
+            "output_3": 0.1798316054136109
+          }
+        },
+        {
+          "name": "mm_quotes_at_least_80pct_of_time",
+          "passed": true,
+          "value": 1.0
+        },
+        {
+          "name": "mm_inventory_mean_reverts",
+          "passed": true,
+          "value": {
+            "abs_inventory_mean": 0.19724417590938714,
+            "excursions_returned_share": 0.9929694727104533,
+            "minutes_to_return_mean": 14.476802683063164
+          }
+        },
+        {
+          "name": "no_input_at_clip_over_1pct",
+          "passed": true,
+          "value": {
+            "worst_share": 0.004951974386339381,
+            "worst_inputs": {
+              "volume_ratio": 0.004951974386339381,
+              "mem_rv_today_ratio": 0.003553895410885806,
+              "mem_rv30_ratio": 0.002742796157950907,
+              "mem_ret_30m": 0.0027107790821771613,
+              "mem_ema20_dist": 0.002497331910352188
+            }
+          }
+        },
+        {
+          "name": "no_constant_input",
+          "passed": true,
+          "value": {
+            "constant_inputs": []
+          }
+        },
+        {
+          "name": "few_memory_sessions_not_wild",
+          "passed": true,
+          "value": {
+            "turnover_per_session": {
+              "low_M": 12.309159169082799,
+              "high_M": 13.43785692004483,
+              "ratio": 0.9160061193032657
+            },
+            "max_drawdown": {
+              "low_M": 0.012512450028169603,
+              "high_M": 0.01122545743100569,
+              "ratio": 1.1146494568327459
+            }
+          }
+        },
+        {
+          "name": "memory_used_in_top5_reasons",
+          "passed": true,
+          "value": {
+            "share_of_decisions_with_mem_input_in_top5": 0.7952,
+            "share_of_top5_slots_that_are_mem": 0.2852266666666667,
+            "n_decisions": 3750
+          }
+        }
+      ],
+      "checks_failed": []
+    },
+    "eval_validation": {
+      "split": "validation",
+      "episodes": 30,
+      "cost_mult": null,
+      "stocks": null,
+      "metrics": {
+        "episodes": 30,
+        "profit_after_costs_mean": -62573.0374095082,
+        "profit_after_costs_total": -1877191.122285246,
+        "return_mean": -0.008705296317593687,
+        "sharpe_per_session_annualised": -10.585952513207982,
+        "session_return_mean": -0.0017501457187330041,
+        "sessions": 150,
+        "worst_drawdown": 0.03396756783887175,
+        "mean_drawdown": 0.010907117513726023,
+        "turnover_per_session": 15.170750531275202,
+        "reward_parts_mean_per_episode": {
+          "cost": -87.00738359497866,
+          "inventory": -7.642924478464449,
+          "spread_markout": -4.523519814857386,
+          "termination": 0.0,
+          "uptime": 38.13665628308907
+        },
+        "pnl_spread_markout_total": -1604882.5090247004,
+        "pnl_inventory_total": -272308.6132605456,
+        "fees_total": 1475773.6740247058,
+        "n_fills": 36360,
+        "shares_traded": 14530698.0,
+        "spread_captured_per_round_trip": 0.7409711701392471,
+        "spread_captured_per_round_trip_ticks": 1.4819423402784941,
+        "abs_inventory_mean": 0.2059761851509922,
+        "abs_inventory_max": 0.9929245283018868,
+        "minutes_to_return_to_zero_mean": 14.78216599814872,
+        "excursions_total": 3266,
+        "excursions_returned_share": 0.9923453766074709,
+        "adverse_selection_1m_per_share": 0.3793708316696145,
+        "adverse_selection_1m_per_share_ticks": 0.758741663339229,
+        "share_quoted_any": 1.0,
+        "share_quoted_both": 0.9997154037709
+      },
+      "checks": [
+        {
+          "name": "outputs_not_stuck",
+          "passed": true,
+          "value": {
+            "output_0": 0.18375463414389515,
+            "output_1": 0.3554285771918019,
+            "output_2": 0.19948169568625762,
+            "output_3": 0.1698876194568943
+          }
+        },
+        {
+          "name": "mm_quotes_at_least_80pct_of_time",
+          "passed": true,
+          "value": 1.0
+        },
+        {
+          "name": "mm_inventory_mean_reverts",
+          "passed": true,
+          "value": {
+            "abs_inventory_mean": 0.2059761851509922,
+            "excursions_returned_share": 0.9923453766074709,
+            "minutes_to_return_mean": 14.78216599814872
+          }
+        },
+        {
+          "name": "no_input_at_clip_over_1pct",
+          "passed": true,
+          "value": {
+            "worst_share": 0.008804695837780149,
+            "worst_inputs": {
+              "mem_rv_today_ratio": 0.008804695837780149,
+              "mem_rv30_ratio": 0.004429028815368196,
+              "volume_ratio": 0.0038598363571682674,
+              "mem_ret_1m": 0.0011739594450373534,
+              "mem_ret_60m": 0.0010672358591248667
+            }
+          }
+        },
+        {
+          "name": "no_constant_input",
+          "passed": true,
+          "value": {
+            "constant_inputs": []
+          }
+        },
+        {
+          "name": "few_memory_sessions_not_wild",
+          "passed": true,
+          "value": {
+            "turnover_per_session": {
+              "low_M": 11.698088050787389,
+              "high_M": 15.326216376463659,
+              "ratio": 0.7632730586233953
+            },
+            "max_drawdown": {
+              "low_M": 0.0100632289152578,
+              "high_M": 0.009594240333434052,
+              "ratio": 1.0488823049584672
+            }
+          }
+        },
+        {
+          "name": "memory_used_in_top5_reasons",
+          "passed": true,
+          "value": {
+            "share_of_decisions_with_mem_input_in_top5": 0.8231111111111111,
+            "share_of_top5_slots_that_are_mem": 0.2936888888888889,
+            "n_decisions": 2250
+          }
+        }
+      ],
+      "checks_failed": []
+    }
+  }
+}
