@@ -1,0 +1,182 @@
+/* ============================================================================
+   theme-tv.css — a plainer, TradingView-like look, loaded after app-shell.css.
+   Only overrides: design-tokens.css and app-shell.css are unchanged, so removing
+   this one <link> in index.html brings the old look back.
+   TradingView light palette (no blue), Trebuchet MS UI font, tabular figures for prices,
+   small radii, no glows, gradients or letter-spaced capitals.
+   ============================================================================ */
+
+:root {
+  color-scheme: light;
+  /* TradingView light: white panels on a pale grey ground, hairline borders */
+  --bg-0:#f0f3fa;
+  --bg-1:#ffffff;
+  --bg-2:#f5f6fa;
+  --bg-3:#ebedf3;
+  --bg-glass:rgba(255,255,255,.97);
+  --scrim:rgba(19,23,34,.35);
+
+  --border:#e0e3eb;
+  --border-strong:#d1d4dc;
+  --border-accent:#13172233;
+
+  --text-hi:#131722;
+  --text:#363a45;
+  --text-mut:#6a6d78;
+  --text-dim:#9598a1;
+
+  /* no blue: actions and selections are charcoal; colour is kept for up/down only */
+  --accent:#131722;
+  --accent-2:#131722;
+  --accent-ink:#ffffff;
+  --accent-soft:rgba(19,23,34,.06);
+  --accent-glow:none;
+
+  --up:#089981;   --up-soft:rgba(8,153,129,.12);   --up-ink:#ffffff;
+  --down:#f23645; --down-soft:rgba(242,54,69,.12); --down-ink:#ffffff;
+
+  --warn:#e67700; --warn-soft:rgba(230,119,0,.12);
+  --info:#363a45; --good:#089981; --bad:#f23645;
+  --live:#089981; --replay:#e67700; --reactive:#363a45;
+
+  --font:-apple-system,BlinkMacSystemFont,'Trebuchet MS',Roboto,Ubuntu,sans-serif;
+  --mono:Consolas,'SF Mono',Menlo,'Liberation Mono',monospace;   /* code only (editor, logs) */
+  --crosshair:#9598a1;
+
+  --r-sm:3px; --r-md:4px; --r-lg:6px; --r-xl:8px;
+  --sh-1:none;
+  --sh-2:0 2px 8px rgba(19,23,34,.08);
+  --sh-3:0 6px 20px rgba(19,23,34,.14);
+  --sh-glow:none;
+
+  --topbar-h:46px;
+}
+
+body{background:var(--bg-0);font-variant-numeric:tabular-nums}
+/* .btn / .chip / .panel set display:flex, which beat the hidden attribute (hidden buttons and empty chips showed) */
+[hidden]{display:none!important}
+::selection{background:rgba(19,23,34,.14)}
+:focus-visible{outline:2px solid var(--accent)}
+
+/* Prices and quantities: the UI font with equal-width digits, like TradingView. Code keeps the monospace. */
+.mono,.val,.stat .v,table.grid td.mono,table.grid td.num,.tb-price{font-family:var(--font)}
+code,pre,.logs-pre,textarea.code,textarea.input.code{font-family:var(--mono)}
+
+/* ---- primitives ---- */
+.panel{background:var(--bg-1);border-color:var(--border);border-radius:var(--r-lg)}
+.panel-head{background:var(--bg-1);color:var(--text-hi);font-size:13px;font-weight:600;
+  letter-spacing:0;text-transform:none;padding:8px 12px}
+.btn{border-radius:var(--r-md);font-weight:500;font-size:13px;background:var(--bg-2);border-color:var(--border-strong);
+  color:var(--text-hi);transition:background var(--dur-1) var(--ease),border-color var(--dur-1) var(--ease)}
+.btn:hover{background:var(--bg-3)}
+.btn:active{transform:none}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:none}
+.btn-primary:hover{background:#2a2e39;border-color:#2a2e39}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-up{background:var(--up);border-color:var(--up);color:#fff}
+.btn-down{background:var(--down);border-color:var(--down);color:#fff}
+.btn-warn{background:var(--warn);border-color:var(--warn);color:#000}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--text-mut)}
+.btn-ghost:hover{background:var(--bg-3);color:var(--text-hi)}
+.btn-sm{padding:6px 12px;font-size:13px}
+.input,.select,textarea.input{border-radius:var(--r-md);background:var(--bg-1);border-color:var(--border-strong);font-size:13px}
+.input:focus,.select:focus,textarea.input:focus{box-shadow:none;border-color:var(--accent)}
+.chip{border-radius:var(--r-sm);font-weight:500;background:var(--bg-2);border-color:var(--border)}
+.chip.reactive{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.pulse{animation:none}
+table.grid th{background:var(--bg-1);font-weight:500;text-transform:none;letter-spacing:0;font-size:12px}
+table.grid tbody tr:hover{background:var(--bg-2)}
+.stat .k{text-transform:none;letter-spacing:0}
+.card{border-radius:var(--r-lg)}
+.toast{background:var(--bg-2);backdrop-filter:none;border-color:var(--border-strong);border-radius:var(--r-md);box-shadow:var(--sh-3)}
+.ui-modal{border-radius:var(--r-lg)}
+.splitter:hover::after,.splitter.dragging::after{background:var(--accent)}
+
+/* ---- top bar ---- */
+.topbar{background:var(--bg-1);gap:20px;padding:0 14px}
+.brand-mark{display:none}
+.brand-name{font-size:15px;font-weight:700;letter-spacing:0;color:var(--text-hi)}
+.topbar-status{gap:14px}
+.tb-sym{font-size:14px;font-weight:600;color:var(--text-hi);white-space:nowrap}
+.tb-price{font-size:15px;font-weight:600}
+.tb-state{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text);white-space:nowrap}
+.tb-state[hidden]{display:none}
+.tb-state .dot{width:6px;height:6px;border-radius:50%;background:var(--text-mut)}
+.tb-state.live .dot{background:var(--up)}
+.tb-state.replay .dot{background:var(--warn)}
+.tb-state.off .dot{background:var(--text-dim)}
+.tb-stat{font-size:12px;color:var(--text-mut)}
+.tb-stat b{font-weight:500;color:var(--text)}
+.conn-dot{width:7px;height:7px;box-shadow:none}
+.conn-dot.on{box-shadow:none}
+.tb-menu-wrap{position:relative;display:inline-flex}
+.tb-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:var(--z-drawer);width:290px;padding:4px;
+  display:flex;flex-direction:column;background:var(--bg-2);border:1px solid var(--border-strong);
+  border-radius:var(--r-md);box-shadow:var(--sh-3)}
+.tb-menu[hidden]{display:none}
+.tb-menu button{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r-sm)}
+.tb-menu button:hover,.tb-menu button:focus-visible{background:var(--bg-3)}
+.tb-menu b{font-size:13px;font-weight:600;color:var(--text-hi)}
+.tb-menu span{font-size:12px;color:var(--text-mut);line-height:1.4}
+
+/* ---- left navigation ---- */
+.nav-rail{background:var(--bg-1)}
+.nav-group{font-size:11px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--text-dim)}
+.nav-item{border-radius:var(--r-md);font-size:13px;color:var(--text-mut)}
+.nav-item:hover{background:var(--bg-2)}
+.nav-item.active{background:var(--bg-3);color:var(--text-hi);box-shadow:none}
+.nav-item.active::before{width:2px;border-radius:0;background:var(--accent)}
+
+/* ---- right side panel ---- */
+.rhs-panel{background:var(--bg-1)}
+.rhs-title{letter-spacing:0;text-transform:none}
+.cta-big{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r-md);font-size:13px;box-shadow:none}
+.cta-big:hover{background:var(--bg-3);border-color:var(--border-strong);box-shadow:none}
+.cta-big:active{transform:none}
+.cta-big .cta-n{background:var(--bg-3);color:var(--text-hi)}
+.cta-big svg{color:var(--text-mut)}
+.rhs-section{border-radius:var(--r-lg)}
+.rhs-section-head{background:var(--bg-1);color:var(--text-hi);font-size:13px;letter-spacing:0;text-transform:none}
+
+/* ---- chart furniture ---- */
+.ohlc-readout{background:transparent;backdrop-filter:none;font-family:var(--font);padding:2px 4px}
+.mk-tf button{font-family:var(--font)}
+
+/* ---- light-theme details ---- */
+*{scrollbar-color:var(--border-strong) transparent}
+::-webkit-scrollbar-thumb{background:var(--border-strong);background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--text-dim);background-clip:content-box}
+.rs .input,.rs .select{background:var(--bg-1)}
+.rs-back{color:var(--text-mut)}
+.rs-back:hover{color:var(--text-hi)}
+.mk-tip{box-shadow:var(--sh-3)}
+.tape-row .you{color:var(--text-hi)}
+.ws-banner{color:var(--text-hi)}
+
+/* ---- the Chronos logo: the mark (assets/logo-mark.svg, inlined so it takes the text colour) + wordmark ---- */
+a.brand,a.logo{display:inline-flex;align-items:center;gap:9px;color:var(--text-hi);text-decoration:none;user-select:none}
+a.brand:hover,a.logo:hover{text-decoration:none}
+.brand-logo{height:15px;width:auto;flex:none;color:var(--text-hi)}
+a.brand .brand-name,a.logo .brand-name{font-family:'Montserrat',var(--font);font-weight:700;font-size:14px;
+  letter-spacing:.08em;color:var(--text-hi)}
+.mk-empty-logo{display:flex;flex-direction:column;align-items:center;gap:10px;color:var(--text-hi);margin-bottom:6px}
+.mk-empty-logo svg{width:auto;height:46px;opacity:1}
+.mk-empty-logo b{font-family:'Montserrat',var(--font);font-weight:700;font-size:22px;letter-spacing:.08em}
+.mk-empty-logo span{font-family:'Montserrat',var(--font);font-weight:500;font-size:11px;letter-spacing:.12em;color:var(--text-mut)}
+
+/* ---- side panel: stop a running strategy ---- */
+.mini-strat{align-items:center}
+.rhs-stop,.rhs-stopall{all:unset;cursor:pointer;font-size:11.5px;color:var(--down);padding:1px 6px;border-radius:3px;
+  border:1px solid transparent;flex:none;text-transform:none;letter-spacing:0;font-weight:500}
+.rhs-stop:hover,.rhs-stopall:hover{border-color:var(--down);background:var(--down-soft)}
+.rhs-stop:focus-visible,.rhs-stopall:focus-visible{outline:2px solid var(--down)}
+.rhs-stop:disabled{opacity:.5;cursor:default}
+
+/* ---- left navigation: tighter, and no "·" group dots in the collapsed rail ---- */
+.nav-items{padding:6px 6px}
+.nav-group{padding:10px 10px 2px}
+.nav-item{padding:6px 10px;margin:0;gap:10px}
+.nav-rail.rail .nav-group{display:none}
+.nav-rail.rail .nav-items{padding:6px 4px;display:flex;flex-direction:column;gap:2px}
+.nav-rail.rail .nav-item{padding:8px 0}
+.nav-rail.rail .nav-item.active::before{left:-4px}

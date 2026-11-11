@@ -579,8 +579,24 @@ def test_scale_from_replayed_bars():
     sig2, adv2 = btm._scale_from_bars(bars, 30, m)               # one full day: 1-minute fallback
     r = np.diff(np.log([b["c"] for b in bars[:30]]))
     assert sig2 == pytest.approx(np.std(r, ddof=1) * math.sqrt(m)) and adv2 == pytest.approx(1000 * m)
-    sig3, adv3 = btm._scale_from_bars(bars, 1, m)                # nothing to estimate: defaults
-    assert sig3 > 0 and adv3 > 0
+    sig3, adv3 = btm._scale_from_bars(bars, 1, m)                # one bar: sized from the first session instead
+    assert sig3 > 0 and adv3 == pytest.approx(1000 * m)
+
+
+def test_a_hand_over_at_the_first_bar_does_not_make_a_one_share_market():
+    """Yahoo's first bar can have volume 0. Sizing the market from that one bar gave adv = 1 share (a 1-share
+    latent book and a huge footprint); it is now sized from the first session, without the empty bars."""
+    m = 40
+    rng = np.random.default_rng(3)
+    bars, px = [], 2500.0
+    for k in range(3 * m):
+        px *= math.exp(rng.normal(0, 0.0008))
+        bars.append({"o": px, "h": px, "l": px, "c": px, "v": 0 if k in (0, 7) else 20000})
+    sig, adv = btm._scale_from_bars(bars, 1, m)
+    assert adv == pytest.approx(20000 * m)                        # not 1 share
+    assert 0.001 < sig < 0.05
+    sig0, adv0 = btm._scale_from_bars([{**b, "v": 0} for b in bars], 1, m)
+    assert adv0 >= 1e5                                            # no volume data at all: a deep market, not 1 share
 
 
 def test_env_tape_scale_is_causal_and_cached(bt):
@@ -607,7 +623,8 @@ def test_launcher_import_does_not_start_the_server(monkeypatch):
     monkeypatch.delenv("CHRONOS_MODE", raising=False)
     had_end = os.environ.pop("CHRONOS_TAPE_END", None)
     saved = (MatchingEngine._refresh_sim_lp, MatchingEngine.handle_message, HistoricalReplayer.step, btm._INSTALLED)
-    saved_ff = {n: MatchingEngine.__dict__[n] for n in ("_apply_fill", "start_replay", "init_sim")}
+    saved_ff = {n: MatchingEngine.__dict__[n] for n in ("_apply_fill", "physics_tick", "start_replay", "init_sim")}
+    saved_server = {n: getattr(server, n) for n in ("zmq", "time", "TICK_INTERVAL_S", "POLL_TIMEOUT_MS")}
     try:
         sys.modules.pop("tools.run_engine_backtest", None)
         mod = importlib.import_module("tools.run_engine_backtest")
@@ -626,6 +643,8 @@ def test_launcher_import_does_not_start_the_server(monkeypatch):
          btm._INSTALLED) = saved
         for n, f in saved_ff.items():
             setattr(MatchingEngine, n, f)
+        for n, v in saved_server.items():                   # sim_speed swaps the server's clock and zmq
+            setattr(server, n, v)
         os.environ.pop("CHRONOS_TAPE_END", None)
         if had_end is not None:
             os.environ["CHRONOS_TAPE_END"] = had_end

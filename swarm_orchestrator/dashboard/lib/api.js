@@ -110,6 +110,11 @@ export const api = {
   /** POST /api/replay/handover {at_bar?} → {status, at_bar, bars_replayed}. Hands a replay to the agents. */
   handover: (atBar) => post('/api/replay/handover', atBar != null ? { at_bar: atBar } : {}),
 
+  /** GET /api/replay/real?since=N → {tape, count, run_id, bars:[{time,o,h,l,c,v}]}: the real candles of the
+   *  replayed data that have run so far, at the simulated minutes they ran in (the chart's eye button);
+   *  plus {sim_count, sim:[...]}: the run's simulated candles from index simSince, to fill minutes a page missed. */
+  real: (since = 0, simSince = 0) => get(`/api/replay/real?since=${enc(since)}&sim_since=${enc(simSince)}`),
+
   /** Market mode (engine started via tools.run_engine_backtest; 501 if it was not).
    *  GET → {mode: free|backtest, on_tape_end: continue|pause, engine_mode, locked, tape_bars, bars_done, tape_exhausted};
    *  set({mode?, on_tape_end?}) → same shape; 409 = mode locked after the hand-over. */

@@ -23,7 +23,8 @@ def main() -> None:
     from agents import backtest_mode
     backtest_mode.install_switchable()
     from engine import server
-    from tools import sim_speed
+    from tools import real_tape, sim_speed
+    real_tape.install()                # the chart's eye button: real candles behind the chart (tools/real_tape.py)
     sim_speed.install(server)          # the chart's fast-forward button (tools/sim_speed.py)
     server.main()
 

@@ -116,6 +116,35 @@ export const store = {
   /** @param {number} n @returns the last n one-minute candles of the current run, oldest first (a copy) */
   barsTail(n) { return bars.slice(-Math.max(1, n)); },
 
+  /**
+   * Add one-minute candles this page missed (Skip all can outrun the socket; a reloaded page starts empty).
+   * @param {{time,o,h,l,c,v}[]} list candles from the engine (/api/replay/real "sim")
+   * @param {string} rid the run they belong to; ignored unless it is the current run
+   * @returns {number} how many were added (a minute the page already has is kept as it is)
+   */
+  fillBars(list, rid) {
+    if (!rid || rid !== runId || !list || !list.length) return 0;
+    const have = new Set(bars.map((b) => b.time));
+    let added = 0;
+    for (const r of list) {
+      if (have.has(r.time)) continue;
+      bars.push({ time: r.time, open: r.o, high: r.h, low: r.l, close: r.c, volume: r.v || 0 });
+      added += 1;
+    }
+    if (added) {
+      bars.sort((a, b) => a.time - b.time);
+      if (bars.length > BAR_CAP) bars.splice(0, bars.length - BAR_CAP);
+    }
+    return added;
+  },
+
+  /** @param {number} t unix seconds @returns the one-minute candles from time t on, oldest first (a copy) */
+  barsSince(t) {
+    let i = bars.length;
+    while (i > 0 && bars[i - 1].time >= t) i -= 1;
+    return bars.slice(i);
+  },
+
   /** @returns {object|null} the most recent tick payload, or null before START */
   latestTick() { return store.state.tick; },
 
@@ -159,7 +188,7 @@ function dispatch(topic, data) {
         emit(listeners.reset, data);
       }
     }
-    recordBar(data);
+    if (data.run_id) recordBar(data);     // an idle engine (no run yet) ticks without a run_id: no candle
     store.state.tick = data;
     store.state.mode = data.mode ?? store.state.mode;
     store.state.day = data.day_count ?? store.state.day;

@@ -10,27 +10,27 @@ import { fmt } from './lib/format.js';
 import { ui } from './lib/ui.js';
 import { charts } from './lib/charts.js';
 import { splitter } from './lib/splitter.js';
+import { runstate } from './lib/runstate.js';
 
 import market from './views/market.js';
 import strategies from './views/strategies.js';
 import results from './views/results.js';
 import timemachine from './views/timemachine.js';
-import replaydata from './views/replaydata.js';   // pick a Yahoo stock / upload a CSV to replay
 import runs from './views/runs.js';
 import lab from './views/lab.js';
 
 const ctx = { store, api, fmt, ui, charts, splitter };
 
 /** Fixed nav order (DESIGN.md). Group fallback if a view omits its own. */
-// replaydata sits right under Market so it is easy to find.
-const VIEWS = [market, replaydata, strategies, results, timemachine,lab, runs];
+// The old "Your Data" page now lives on the main page (views/run_setup.js, the New run panel).
+const VIEWS = [market, strategies, results, timemachine, lab, runs];
 const GROUP_FALLBACK = {
-  market: '', replaydata: 'Replay', strategies: 'Trading', results: 'Trading',
+  market: '', strategies: 'Trading', results: 'Trading',
   timemachine: 'Lab', lab: 'Lab',
   runs: 'Data',
 };
 const ICON_FALLBACK = {
-  market: 'candles', replaydata: 'upload', strategies: 'code', results: 'report',
+  market: 'candles', strategies: 'code', results: 'report',
   timemachine: 'clock', lab: 'flask', runs: 'database',
 };
 /** Views whose data pops out to a standalone page via the topbar ⤢. */
@@ -53,37 +53,64 @@ const el = {
   dayN: document.getElementById('tb-day-n'),
   clock: document.getElementById('tb-clock'),
   price: document.getElementById('tb-price'),
-  regime: document.getElementById('tb-regime'),
-  regimeText: document.getElementById('tb-regime-text'),
+  sym: document.getElementById('tb-sym'),
   conn: document.getElementById('tb-conn'),
-  start: document.getElementById('tb-start'),
   pause: document.getElementById('tb-pause'),
-  reset: document.getElementById('tb-reset'),
+  stop: document.getElementById('tb-stop'),
+  stopMenu: document.getElementById('tb-stop-menu'),
   pop: document.getElementById('tb-pop'),
 };
 
 /* ============================== TOPBAR ================================== */
 
 let lastPrice = null;
-let reactivePulsed = false;
 let paused = false;
+let btMode = null;            // 'free' | 'backtest' (GET /api/mode), for the status label after a hand-over
 
-function setModeChip(mode) {
-  if (!mode) return;
-  el.mode.hidden = false;
-  el.modeText.textContent = mode;
-  el.mode.className = `chip ${mode === 'LIVE' ? 'live' : mode === 'REPLAY' ? 'replay' : 'reactive'}`;
-  if (mode === 'REACTIVE' && !reactivePulsed) {
-    reactivePulsed = true;
-    el.mode.classList.add('pulse');
-    setTimeout(() => el.mode.classList.remove('pulse'), 12000);
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** '11 Nov 2026' from the tick's unix time (the sim clock is IST written as UTC, so read the UTC parts). */
+function dateOf(unix) {
+  if (!Number.isFinite(unix)) return '—';
+  const d = new Date(unix * 1000);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/** Plain-words market status: [label, colour class, tooltip]. */
+function statusOf(tick, rs) {
+  if (rs.stopped) return ['Stopped', 'off', 'This run is frozen. Use New run to start another.'];
+  if (tick.paused) return ['Paused', 'off', 'The market is paused. Press Resume to carry on.'];
+  if (tick.mode === 'REPLAY') return ['Real data', 'replay', 'Playing the real market data minute by minute.'];
+  if (tick.mode === 'REACTIVE') {
+    return btMode === 'backtest'
+      ? ['Backtest', 'live', 'The real data keeps playing; your trades move it by their market impact.']
+      : ['Simulated traders', 'live', 'After your first trade the simulated traders set the price.'];
   }
+  return ['Simulated', 'live', 'A simulated stock: the price comes from the simulated traders.'];
+}
+
+async function refreshBtMode() {
+  try { btMode = (await api.mode.get()).mode; } catch { btMode = null; }
+  renderStatus();
+}
+
+function renderStatus() {
+  const tick = store.latestTick();
+  if (!tick || !tick.run_id) return;
+  const [label, cls, tip] = statusOf(tick, runstate.get());
+  el.mode.hidden = false;
+  el.mode.className = `tb-state ${cls}`;
+  el.mode.title = tip;
+  el.modeText.textContent = label;
 }
 
 function onTick(tick) {
-  setModeChip(tick.mode);
+  const live = !!tick.run_id;          // an idle engine (nothing started yet) ticks without a run_id
+  for (const e of [el.sym, el.day, el.clock, el.price, el.mode]) e.hidden = !live;
+  if (!live) return;
+  el.sym.hidden = !tick.symbol;
+  el.sym.textContent = tick.symbol || '';
   el.day.hidden = false;
-  el.dayN.textContent = tick.day_count ?? '—';
+  el.dayN.textContent = dateOf(tick.unix_time);          // the data's own date, not the sim's day counter
   el.clock.hidden = false;
   el.clock.textContent = fmt.time(tick.unix_time);
   el.price.hidden = false;
@@ -93,76 +120,59 @@ function onTick(tick) {
     el.price.classList.toggle('down', tick.last_price < lastPrice);
   }
   lastPrice = tick.last_price;
-  el.regime.hidden = false;
-  el.regimeText.textContent = tick.regime;
-  el.regime.className = `chip ${tick.regime === 'BULL' ? 'up' : tick.regime === 'BEAR' ? 'down' : ''}`;
   paused = !!tick.paused;
-  el.pause.disabled = false;
-  el.reset.disabled = false;
-  el.pause.textContent = paused ? 'RESUME' : 'PAUSE';
+  el.pause.textContent = paused ? 'Resume' : 'Pause';
+  renderStatus();
 }
 
-function simConfig() {
-  try { return JSON.parse(localStorage.getItem('chronos.simcfg') || 'null') || {}; } catch { return {}; }
+/** Pause/Resume and Stop are shown only while a run is on; a stopped run offers only New run. */
+function renderControls(rs) {
+  const on = rs.hasRun && rs.view === 'live';
+  el.pause.hidden = !on || rs.stopped;
+  el.stop.hidden = !on;
+  el.stop.textContent = rs.stopped ? 'New run' : 'Stop';
+  el.stop.setAttribute('aria-haspopup', rs.stopped ? 'false' : 'menu');
+  closeStopMenu();
+  renderStatus();
 }
 
-/** Open the START (or RESET) configuration modal and launch the run. */
-function openStartModal(title = 'Start Simulation') {
-  const cfg = simConfig();
-  const sectors = ['TECH', 'DEFENSE', 'PHARMA', 'OIL', 'BANK'];
-  const opts = sectors.map((s) => `<option value="${s}"${cfg.sector === s ? ' selected' : ''}>${s}</option>`).join('');
-  const body = `
-    <div class="form-row">
-      <label class="field">Symbol<input id="m-symbol" class="input mono" value="${cfg.symbol || 'TCS'}" maxlength="12"></label>
-      <label class="field">Sector<select id="m-sector" class="select">${opts}</select></label>
-    </div>
-    <div class="form-row">
-      <label class="field">Start price (₹)<input id="m-price" class="input mono" type="number" step="0.05" min="0.05" value="${cfg.price ?? 190}"></label>
-      <label class="field">Seed<input id="m-seed" class="input mono" type="number" value="${cfg.seed ?? 42}"></label>
-    </div>
-    <p class="hint-line">One physics tick per second = one simulated market minute (09:15 → 15:30 IST).</p>`;
-  const m = ui.modal({
-    title,
-    body,
-    actions: [
-      { label: 'Cancel' },
-      {
-        label: 'Start',
-        kind: 'primary',
-        onClick: async (close, btn) => {
-          const payload = {
-            symbol: (m.body.querySelector('#m-symbol').value || 'TCS').trim().toUpperCase(),
-            sector: m.body.querySelector('#m-sector').value,
-            price: parseFloat(m.body.querySelector('#m-price').value) || 190,
-            seed: parseInt(m.body.querySelector('#m-seed').value, 10) || 42,
-          };
-          try {
-            const res = await ui.busy(btn, () => api.sim.start(payload));
-            localStorage.setItem('chronos.simcfg', JSON.stringify(payload));
-            ui.toast(`Simulation started — ${res.run_id || payload.symbol}`, 'good');
-            close();
-          } catch (err) {
-            ui.toast(`Start failed: ${err.detail || err.message}`, 'bad');
-          }
-        },
-      },
-    ],
-  });
+function closeStopMenu() {
+  el.stopMenu.hidden = true;
+  el.stop.setAttribute('aria-expanded', 'false');
 }
-
-el.start.addEventListener('click', () => openStartModal());
 
 el.pause.addEventListener('click', async () => {
   try {
-    if (paused) { await api.sim.resume(); ui.toast('Simulation resumed', 'good'); }
-    else { await api.sim.stop(); ui.toast('Simulation paused', 'warn'); }
+    if (paused) await api.sim.resume();
+    else await api.sim.stop();
   } catch (err) { ui.toast(`Control failed: ${err.detail || err.message}`, 'bad'); }
 });
 
-el.reset.addEventListener('click', async () => {
-  const ok = await ui.confirm('Start a fresh run? The current market state will be replaced (the old run stays persisted).');
-  if (ok) openStartModal('Reset — New Run');
+el.stop.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (runstate.get().stopped) { runstate.newRun().catch((err) => ui.toast(`New run failed: ${err.detail || err.message}`, 'bad')); return; }
+  const open = el.stopMenu.hidden;
+  el.stopMenu.hidden = !open;
+  el.stop.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) el.stopMenu.querySelector('button').focus();
 });
+el.stopMenu.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-act]');
+  if (!b) return;
+  closeStopMenu();
+  try {
+    if (b.dataset.act === 'stop') await runstate.stop();
+    else await runstate.newRun();
+  } catch (err) { ui.toast(`Stop failed: ${err.detail || err.message}`, 'bad'); }
+});
+document.addEventListener('click', (e) => { if (!e.target.closest('.tb-menu-wrap')) closeStopMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeStopMenu(); });
+
+runstate.onChange(renderControls);
+store.onEvent((e) => { if (e.kind === 'mode_change') refreshBtMode(); });
+let lastRun = null;
+store.onTick((t) => { if (t.run_id !== lastRun) { lastRun = t.run_id; refreshBtMode(); } });
+renderControls(runstate.get());
 
 el.pop.innerHTML = ui.icon('popout');
 el.pop.addEventListener('click', () => {
@@ -190,7 +200,7 @@ function buildNav() {
     if (group && group !== lastGroup) {
       const g = document.createElement('div');
       g.className = 'nav-group';
-      g.textContent = group;
+      g.textContent = group.charAt(0).toUpperCase() + group.slice(1).toLowerCase();   // 'LAB' -> 'Lab'
       items.appendChild(g);
     }
     lastGroup = group || lastGroup;
@@ -265,7 +275,7 @@ async function route() {
   currentId = view.id;
   setActiveNav(view.id);
   el.pop.hidden = !POP_PAGES[view.id];
-  document.title = `Chronos Terminal — ${view.title}`;
+  document.title = `Chronos · ${view.title}`;
   try {
     await view.mount(el.center, ctx);
   } catch (err) {
@@ -321,11 +331,34 @@ function buildRhs() {
   cta.appendChild(upBtn);
   scroll.appendChild(cta);
 
-  /* -- running strategies -- */
-  const strat = rhsSection('Running Strategies');
+  /* -- running strategies (Stop each, or Stop all) -- */
+  const strat = rhsSection('Running Strategies', '<button type="button" class="rhs-stopall" data-stopall hidden>Stop all</button>');
   scroll.appendChild(strat);
   rhsState.stratBody = strat.querySelector('.rhs-section-body');
   rhsState.stratBody.innerHTML = '<span class="dim">none running</span>';
+  rhsState.stopAll = strat.querySelector('[data-stopall]');
+  rhsState.stopAll.addEventListener('click', async () => {
+    let list = [];
+    try { list = await api.strategy.list(); } catch { /* nothing to stop */ }
+    const running = list.filter((s) => s.status === 'running');
+    rhsState.stopAll.disabled = true;
+    try {
+      await Promise.all(running.map((s) => api.strategy.stop(s.strategy_id)));
+      ui.toast(`Stopped ${running.length} strateg${running.length === 1 ? 'y' : 'ies'}`, 'good');
+    } catch (err) { ui.toast(`Stop failed: ${err.detail || err.message}`, 'bad'); }
+    rhsState.stopAll.disabled = false;
+    pollStrategies();
+  });
+  rhsState.stratBody.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-stop]');
+    if (!b) return;
+    b.disabled = true;
+    try {
+      await api.strategy.stop(b.dataset.stop);
+      ui.toast('Strategy stopped', 'good');
+    } catch (err) { ui.toast(`Stop failed: ${err.detail || err.message}`, 'bad'); b.disabled = false; }
+    pollStrategies();
+  });
 
   /* -- event feed -- */
   const feed = rhsSection('Event Feed');
@@ -344,21 +377,27 @@ async function pollStrategies() {
   let list;
   try { list = await api.strategy.list(); } catch { return; }
   if (!Array.isArray(list)) return;
-  if (!list.length) {
+  // only what is running (the stopped ones are on the Strategies page)
+  const running = list.filter((s) => s.status === 'running');
+  rhsState.stopAll.hidden = running.length < 2;
+  if (!running.length) {
     rhsState.stratBody.innerHTML = '<span class="dim">none running</span>';
     return;
   }
-  rhsState.stratBody.innerHTML = list.map((s) => `
+  rhsState.stratBody.innerHTML = running.map((s) => `
     <div class="mini-strat">
-      <span class="sdot ${s.status === 'running' ? 'running' : 'stopped'}" aria-hidden="true"></span>
+      <span class="sdot running" aria-hidden="true"></span>
       <span class="sname" title="${escapeAttr(s.name)}">${escapeHtml(s.name)}</span>
       <span class="sagent">${escapeHtml(s.agent_id || '')}</span>
+      <button type="button" class="rhs-stop" data-stop="${escapeAttr(s.strategy_id)}" title="Stop this strategy">Stop</button>
     </div>`).join('');
 }
 
 const FEED_META = {
   news: (e) => ({ icon: '🔮', cls: (e.score ?? 0) >= 0 ? 'up' : 'down', text: `${e.headline} (${fmt.num(e.score, 2)})` }),
-  mode_change: (e) => ({ icon: '⚡', cls: 'reactive', text: `Mode → ${e.mode}${e.trigger_agent ? ` · triggered by ${e.trigger_agent}` : ''}` }),
+  mode_change: (e) => ({ icon: '↳', cls: 'reactive', text: e.trigger_agent === 'HANDOVER'
+    ? 'Real data handed over to the simulated traders'
+    : `First trade by ${e.trigger_agent}: the market now reacts to your orders` }),
   liquidation: (e) => ({ icon: '↺', cls: 'down', text: `${e.agent_id} liquidated — ledger reset` }),
   session: (e) => ({ icon: '◷', cls: 'muted', text: `Session ${String(e.action || '').replace('_', ' ')}${e.day_count ? ` · day ${e.day_count}` : ''}` }),
 };

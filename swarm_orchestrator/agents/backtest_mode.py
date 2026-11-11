@@ -244,14 +244,26 @@ def env_tape() -> dict:
     return out
 
 
+MIN_SCALE_BARS = 30        # fewer replayed bars than this: size the market from the tape's first session instead
+
+
 def _scale_from_bars(bars: List[dict], upto: int, session: int):
     """(sigma_d, adv) from the first ``upto`` replayed bars: daily log returns and mean daily volume
     over complete days (grouped by ``ts`` when present, else consecutive ``session``-bar chunks); with
-    fewer than 3 complete days, from 1-minute returns scaled by sqrt(session) and mean bar volume x session."""
+    fewer than 3 complete days, from 1-minute returns scaled by sqrt(session) and mean bar volume x session.
+
+    With fewer than MIN_SCALE_BARS replayed (a hand-over in the first minutes) one or two bars cannot size the
+    market, so the tape's first session (at least MIN_SCALE_BARS bars) is used instead. This reads ahead only
+    the SIZE of the market (how volatile, how much volume), never which way the price goes, and only at a hand-over
+    in the first minutes. Bars with no volume (Yahoo has a few) are left out of the volume mean. Without both
+    fixes a hand-over at the first bar, whose volume was 0, gave adv = 1 share: a 1-share latent book and a
+    footprint that moved TCS ~5% off the real price."""
     import numpy as np
-    seen = bars[:upto]
+    n = upto if upto >= MIN_SCALE_BARS else min(len(bars), max(upto, session, MIN_SCALE_BARS))
+    seen = bars[:n]
     c = np.array([b["c"] for b in seen], dtype=float)
     v = np.array([b["v"] for b in seen], dtype=float)
+    vpos = v[v > 0]
     sigma_d = adv = None
     if len(c):
         if all(b.get("ts") is not None for b in seen):
@@ -266,9 +278,11 @@ def _scale_from_bars(bars: List[dict], upto: int, session: int):
             adv = float(np.mean([v[a:b].sum() for a, b in groups]))
         elif len(c) >= 3:
             sigma_d = float(np.std(np.diff(np.log(c)), ddof=1)) * math.sqrt(session)
-            adv = float(v.mean()) * session
+            adv = float(vpos.mean()) * session if len(vpos) else None
     if sigma_d is None:
-        sigma_d, adv = 0.015, max(float(v.mean()) * session, 1.0) if len(v) else 1e6
+        sigma_d = 0.015
+    if not adv:
+        adv = float(vpos.mean()) * session if len(vpos) else 1e6     # no volume in the data at all: a deep market
     return max(sigma_d, 1e-4), max(adv, 1.0)
 
 

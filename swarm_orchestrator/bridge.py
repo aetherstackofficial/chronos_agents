@@ -41,7 +41,7 @@ BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 CHRONOS_DB = os.getenv("CHRONOS_DB", "chronos.db")
 
 CONTROL_TIMEOUT, HEALTH_TIMEOUT = 3.0, 1.5
-WS_QUEUE_MAX, MAX_EQUITY_POINTS = 2000, 5000   # 2000: room for fast-forward bursts (ticks + trades), so no tick is dropped
+WS_QUEUE_MAX, MAX_EQUITY_POINTS = 50_000, 5000   # room for a Skip all burst (ticks + trades), so no tick is dropped
 
 _ctx: Optional[zmq.asyncio.Context] = None
 _sub: Optional[zmq.asyncio.Socket] = None
@@ -179,6 +179,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.sandbox = None
 
     _sub = _ctx.socket(zmq.SUB)
+    # Skip all sends thousands of prints a second: the default 1000-message queue dropped some (chart gaps,
+    # fills missing from Results). Set before connect.
+    _sub.setsockopt(zmq.RCVHWM, 200_000)
     _sub.connect(f"tcp://{ZMQ_HOST}:{ZMQ_DATA_PORT}")
     for topic in ("tick", "trade", "event"):
         _sub.setsockopt_string(zmq.SUBSCRIBE, topic)
@@ -380,12 +383,25 @@ async def mode_set(req: ModeReq) -> dict:
     return await _mode_request(msg)
 
 
+@app.get("/api/replay/real")
+async def replay_real(since: int = 0, sim_since: int = 0) -> dict:
+    """The real candles of the replayed data that have run so far, paired with the simulated minutes they ran
+    in (tools/real_tape.py): {tape, count, run_id, bars:[{time,o,h,l,c,v}]} from index ``since`` on."""
+    if not (ack := await _control_request({"msg": "REAL_TAPE", "since": since, "sim_since": sim_since})):
+        raise HTTPException(status_code=502, detail="engine did not acknowledge REAL_TAPE")
+    if ack.get("status") == "REJECTED":
+        raise HTTPException(status_code=501, detail="this engine cannot show the real data; start it with "
+                                                    "`python -m tools.run_engine_backtest` (run_local.py does)")
+    return {k: ack.get(k) for k in ("tape", "count", "run_id", "bars", "sim_count", "sim")}
+
+
 class SpeedReq(BaseModel):
     action: Optional[str] = None        # "fast_forward" | "normal"
-    factor: Optional[int] = None        # fast_forward only, 2..50 (default 20)
+    factor: Optional[int] = None        # fast_forward only, 2..50 (default 20; 50 for until="data_end")
+    until: Optional[str] = None         # fast_forward only: "trade" (stop at your next fill) | "data_end" (Skip all)
 
 
-_SPEED_KEYS = ("fast_forward", "factor", "last_stop")
+_SPEED_KEYS = ("fast_forward", "factor", "until", "minutes_left", "last_stop")
 
 
 async def _speed_request(msg: dict) -> dict:
@@ -413,6 +429,7 @@ async def speed_set(req: SpeedReq) -> dict:
     msg = {"msg": "SPEED"}
     if req.action is not None: msg["action"] = req.action
     if req.factor is not None: msg["factor"] = req.factor
+    if req.until is not None: msg["until"] = req.until
     return await _speed_request(msg)
 
 @app.post("/api/strategy/run")

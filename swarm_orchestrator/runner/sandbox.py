@@ -418,22 +418,35 @@ class SandboxManager:
     @staticmethod
     def _kill_tree(pid: int) -> None:
         """Terminate a process and all of its children (kill after grace)."""
+        gone = (psutil.NoSuchProcess, psutil.AccessDenied)
         try:
             parent = psutil.Process(pid)
-        except psutil.NoSuchProcess:
+            procs = parent.children(recursive=True) + [parent]
+        except gone:
             return
-        procs = parent.children(recursive=True) + [parent]
         for p in procs:
             try:
                 p.terminate()
-            except psutil.NoSuchProcess:
+            except gone:
                 pass
         _, alive = psutil.wait_procs(procs, timeout=3)
         for p in alive:
             try:
                 p.kill()
-            except psutil.NoSuchProcess:
+            except gone:
                 pass
+
+    @staticmethod
+    def _is_strategy_process(pid: Optional[int], strategy_id: str) -> bool:
+        """True if ``pid`` is still this strategy's process. A record rebuilt from meta.json (e.g. after the
+        bridge restarted) has only the pid, and Windows reuses pids: without this check such a strategy could
+        show as "running" for ever, or Stop could kill an unrelated process that got the same pid."""
+        if not pid:
+            return False
+        try:
+            return strategy_id in " ".join(psutil.Process(pid).cmdline())
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return False
 
     def _mark_exited(self, entry: dict) -> None:
         """Flip a registry entry to exited and persist it."""
@@ -495,7 +508,7 @@ class SandboxManager:
             if proc is not None and proc.poll() is None:
                 self._kill_tree(proc.pid)
                 stopped = True
-            elif pid and psutil.pid_exists(pid):
+            elif self._is_strategy_process(pid, strategy_id):
                 self._kill_tree(pid)
                 stopped = True
 
@@ -524,7 +537,7 @@ class SandboxManager:
                 self._mark_exited(entry)
             return
         pid = entry.get("pid")  # reconstructed entry — only the pid survives
-        if not (pid and psutil.pid_exists(pid)):
+        if not self._is_strategy_process(pid, entry["strategy_id"]):
             self._mark_exited(entry)
 
     def list(self) -> list[dict]:

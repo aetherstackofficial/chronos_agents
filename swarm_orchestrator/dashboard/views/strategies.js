@@ -26,9 +26,17 @@ class UserStrategy(Strategy):
     MAX_HOLD = 45            # minutes
     COOLDOWN = 20            # minutes of rest after getting out
     MAX_EMPTY_SLICES = 5     # give up on a phase after this many slices that fill nothing
+    MAX_SLICES = 20          # and after this many slices in all (a thin book fills only part of each slice)
 
     def on_start(self, config):
         self.me = config.get("agent_id", "?")
+        self.run_id = None
+        self._reset()
+        print(f"[big_block] {self.me} ready: {self.PARENT_QTY:,} shares per block, "
+              f"{self.SLICE_QTY:,} per minute")
+
+    def _reset(self):
+        """A fresh start: called once, and again whenever a new run begins (a new run_id)."""
         self.pos = 0
         self.phase = "WAIT"          # WAIT -> ENTER -> HOLD -> EXIT -> REST -> WAIT
         self.side = 0                # +1 long block, -1 short block
@@ -38,18 +46,23 @@ class UserStrategy(Strategy):
         self.entry_cost = 0.0        # money paid (or received) for the block, to get the average entry
         self.entry_qty = 0
         self.empty = 0
-        print(f"[big_block] {self.me} ready: {self.PARENT_QTY:,} shares per block, "
-              f"{self.SLICE_QTY:,} per minute")
+        self.slices = 0
 
     # ------------------------------------------------------------------ helpers
     def _go(self, phase):
-        self.phase, self.minutes_in_phase, self.empty = phase, 0, 0
+        self.phase, self.minutes_in_phase, self.empty, self.slices = phase, 0, 0, 0
 
     def _slice(self, action, qty):
         return [{"action": action, "type": "MARKET", "qty": int(qty)}]
 
     # ------------------------------------------------------------------ hooks
     def on_tick(self, state):
+        run = state.get("run_id")
+        if run != self.run_id:                   # a new run: forget the old one, warm up again
+            if self.run_id is not None:
+                print(f"[big_block] new run {run}: starting over")
+            self.run_id = run
+            self._reset()
         minute = state.get("unix_time")
         if minute is None or minute == self.last_minute or state.get("paused"):
             return []                # at most one decision per market minute
@@ -82,12 +95,14 @@ class UserStrategy(Strategy):
 
         if self.phase == "ENTER":
             left = self.PARENT_QTY - abs(self.pos)
-            if left <= 0 or self.empty >= self.MAX_EMPTY_SLICES:
+            if left <= 0 or self.empty >= self.MAX_EMPTY_SLICES or self.slices >= self.MAX_SLICES:
                 avg = self.entry_cost / self.entry_qty if self.entry_qty else px
-                print(f"[big_block] block done: position {self.pos:,} at avg {avg:.2f}")
+                thin = f" (the book was thin: got {abs(self.pos):,} of {self.PARENT_QTY:,})" if left > 0 else ""
+                print(f"[big_block] block done: position {self.pos:,} at avg {avg:.2f}{thin}")
                 self._go("HOLD")
                 return []
             self.empty += 1          # reset by on_fill when the slice fills
+            self.slices += 1
             return self._slice("BUY" if self.side > 0 else "SELL", min(self.SLICE_QTY, left))
 
         if self.phase == "HOLD":
@@ -103,11 +118,12 @@ class UserStrategy(Strategy):
                 return []
 
         if self.phase == "EXIT":
-            if self.pos == 0 or self.empty >= self.MAX_EMPTY_SLICES:
+            if self.pos == 0 or self.empty >= self.MAX_EMPTY_SLICES or self.slices >= self.MAX_SLICES:
                 print(f"[big_block] out; position {self.pos:,}. Resting {self.COOLDOWN} minutes")
                 self._go("REST")
                 return []
             self.empty += 1
+            self.slices += 1
             return self._slice("SELL" if self.pos > 0 else "BUY", min(self.SLICE_QTY, abs(self.pos)))
 
         if self.phase == "REST" and self.minutes_in_phase >= self.COOLDOWN:
@@ -130,6 +146,8 @@ const STYLE_ID = 'strat-check-style';
 const CSS = `
 /* .chip is display:inline-flex, which beat the hidden attribute: empty chips showed */
 .panel-head .chip[hidden]{display:none}
+.st-stop,.st-stopall{color:var(--down);border-color:var(--down);background:transparent}
+.st-stop:hover,.st-stopall:hover{background:var(--down-soft)}
 .chk{border-bottom:1px solid var(--border);padding:var(--s-2) var(--s-3);max-height:34%;overflow:auto;font-size:var(--fs-sm);display:flex;flex-direction:column;gap:var(--s-2)}
 .chk[hidden]{display:none}
 .chk.stale{opacity:.55}
@@ -163,6 +181,8 @@ function loadMonaco() {
   });
   return monacoPromise;
 }
+
+export { SDK_TEMPLATE };            // the demo strategy, also offered in the New run panel
 
 export default {
   id: 'strategies',
@@ -216,7 +236,8 @@ export default {
             <div class="panel-body flush scroll-y" data-role="lib"></div>
           </section>
           <section class="panel" aria-label="Running strategies">
-            <div class="panel-head"><span>Running Strategies</span></div>
+            <div class="panel-head"><span>Running Strategies</span>
+              <span class="actions"><button type="button" class="btn btn-sm st-stopall" data-role="stop-all" hidden>Stop all</button></span></div>
             <div class="panel-body flush scroll-y" data-role="running"></div>
           </section>
         </div>
@@ -249,7 +270,7 @@ export default {
       this._editor = monaco.editor.create(this._els.editor, {
         value: initial,
         language: 'python',
-        theme: 'vs-dark',
+        theme: 'vs',
         fontSize: 13,
         fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'JetBrains Mono, monospace',
         minimap: { enabled: false },
@@ -510,6 +531,8 @@ export default {
       try { list = await api.strategy.list(); } catch { return; }
       const host = this._els.running;
       if (!host || !host.isConnected) return;
+      const stopAll = el.querySelector('[data-role="stop-all"]');
+      if (stopAll) stopAll.hidden = !(Array.isArray(list) && list.some((s) => s.status === 'running'));
       if (!Array.isArray(list) || !list.length) {
         host.innerHTML = `<div class="empty">${ui.icon('agent')}<div>Nothing running.<br><span class="dim">Launched strategies trade as first-class agents.</span></div></div>`;
         return;
@@ -523,10 +546,22 @@ export default {
             <td><span class="chip ${s.status === 'running' ? 'up' : ''}">${esc(s.status || '')}</span></td>
             <td class="right">
               <button type="button" class="btn btn-ghost btn-icon btn-sm" data-act="logs" aria-label="View logs for ${esc(s.name)}" title="Logs">${ui.icon('logs')}</button>
-              <button type="button" class="btn btn-ghost btn-icon btn-sm" data-act="stop" aria-label="Stop ${esc(s.name)}" title="Stop" ${s.status !== 'running' ? 'disabled' : ''}>${ui.icon('pause')}</button>
+              ${s.status === 'running' ? `<button type="button" class="btn btn-sm st-stop" data-act="stop" aria-label="Stop ${esc(s.name)}" title="Stop this strategy">Stop</button>` : ''}
             </td>
           </tr>`).join('')}</tbody></table>`;
     };
+
+    el.querySelector('[data-role="stop-all"]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      let list = [];
+      try { list = await api.strategy.list(); } catch { /* shown below */ }
+      const running = list.filter((s) => s.status === 'running');
+      try {
+        await ui.busy(btn, () => Promise.all(running.map((s) => api.strategy.stop(s.strategy_id))));
+        ui.toast(`Stopped ${running.length} strateg${running.length === 1 ? 'y' : 'ies'}`, 'good');
+      } catch (err) { ui.toast(`Stop failed: ${err.detail || err.message}`, 'bad'); }
+      renderRunning();
+    });
 
     this._els.running.addEventListener('click', async (e) => {
       const btn = e.target.closest('button[data-act]');

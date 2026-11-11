@@ -41,9 +41,17 @@ class UserStrategy(Strategy):
     MAX_HOLD = 45            # minutes
     COOLDOWN = 20            # minutes of rest after getting out
     MAX_EMPTY_SLICES = 5     # give up on a phase after this many slices that fill nothing
+    MAX_SLICES = 20          # and after this many slices in all (a thin book fills only part of each slice)
 
     def on_start(self, config):
         self.me = config.get("agent_id", "?")
+        self.run_id = None
+        self._reset()
+        print(f"[big_block] {self.me} ready: {self.PARENT_QTY:,} shares per block, "
+              f"{self.SLICE_QTY:,} per minute")
+
+    def _reset(self):
+        """A fresh start: called once, and again whenever a new run begins (a new run_id)."""
         self.pos = 0
         self.phase = "WAIT"          # WAIT -> ENTER -> HOLD -> EXIT -> REST -> WAIT
         self.side = 0                # +1 long block, -1 short block
@@ -53,18 +61,23 @@ class UserStrategy(Strategy):
         self.entry_cost = 0.0        # money paid (or received) for the block, to get the average entry
         self.entry_qty = 0
         self.empty = 0
-        print(f"[big_block] {self.me} ready: {self.PARENT_QTY:,} shares per block, "
-              f"{self.SLICE_QTY:,} per minute")
+        self.slices = 0
 
     # ------------------------------------------------------------------ helpers
     def _go(self, phase):
-        self.phase, self.minutes_in_phase, self.empty = phase, 0, 0
+        self.phase, self.minutes_in_phase, self.empty, self.slices = phase, 0, 0, 0
 
     def _slice(self, action, qty):
         return [{"action": action, "type": "MARKET", "qty": int(qty)}]
 
     # ------------------------------------------------------------------ hooks
     def on_tick(self, state):
+        run = state.get("run_id")
+        if run != self.run_id:                   # a new run: forget the old one, warm up again
+            if self.run_id is not None:
+                print(f"[big_block] new run {run}: starting over")
+            self.run_id = run
+            self._reset()
         minute = state.get("unix_time")
         if minute is None or minute == self.last_minute or state.get("paused"):
             return []                # at most one decision per market minute
@@ -97,12 +110,14 @@ class UserStrategy(Strategy):
 
         if self.phase == "ENTER":
             left = self.PARENT_QTY - abs(self.pos)
-            if left <= 0 or self.empty >= self.MAX_EMPTY_SLICES:
+            if left <= 0 or self.empty >= self.MAX_EMPTY_SLICES or self.slices >= self.MAX_SLICES:
                 avg = self.entry_cost / self.entry_qty if self.entry_qty else px
-                print(f"[big_block] block done: position {self.pos:,} at avg {avg:.2f}")
+                thin = f" (the book was thin: got {abs(self.pos):,} of {self.PARENT_QTY:,})" if left > 0 else ""
+                print(f"[big_block] block done: position {self.pos:,} at avg {avg:.2f}{thin}")
                 self._go("HOLD")
                 return []
             self.empty += 1          # reset by on_fill when the slice fills
+            self.slices += 1
             return self._slice("BUY" if self.side > 0 else "SELL", min(self.SLICE_QTY, left))
 
         if self.phase == "HOLD":
@@ -118,11 +133,12 @@ class UserStrategy(Strategy):
                 return []
 
         if self.phase == "EXIT":
-            if self.pos == 0 or self.empty >= self.MAX_EMPTY_SLICES:
+            if self.pos == 0 or self.empty >= self.MAX_EMPTY_SLICES or self.slices >= self.MAX_SLICES:
                 print(f"[big_block] out; position {self.pos:,}. Resting {self.COOLDOWN} minutes")
                 self._go("REST")
                 return []
             self.empty += 1
+            self.slices += 1
             return self._slice("SELL" if self.pos > 0 else "BUY", min(self.SLICE_QTY, abs(self.pos)))
 
         if self.phase == "REST" and self.minutes_in_phase >= self.COOLDOWN:

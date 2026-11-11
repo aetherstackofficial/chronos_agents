@@ -43,7 +43,7 @@ function baseOptions(extra = {}) {
     layout: {
       background: { type: 'solid', color: 'transparent' },
       textColor: tok('--text-mut', '#7c889b'),
-      fontFamily: tok('--mono', 'JetBrains Mono, monospace'),
+      fontFamily: tok('--font', 'Trebuchet MS, sans-serif'),
       fontSize: 11,
       attributionLogo: false,
     },
@@ -55,8 +55,8 @@ function baseOptions(extra = {}) {
     timeScale: { borderVisible: false, timeVisible: true, secondsVisible: false, rightOffset: 3 },
     crosshair: {
       mode: LC.CrosshairMode.Normal,
-      vertLine: { color: rgba(tok('--accent-2', '#00d1ff'), 0.5), width: 1, style: LC.LineStyle.Dotted, labelBackgroundColor: tok('--bg-3', '#161d2e') },
-      horzLine: { color: rgba(tok('--accent-2', '#00d1ff'), 0.5), width: 1, style: LC.LineStyle.Dotted, labelBackgroundColor: tok('--bg-3', '#161d2e') },
+      vertLine: { color: tok('--crosshair', rgba(tok('--accent-2', '#00d1ff'), 0.5)), width: 1, style: LC.LineStyle.Dashed, labelBackgroundColor: tok('--bg-3', '#161d2e') },
+      horzLine: { color: tok('--crosshair', rgba(tok('--accent-2', '#00d1ff'), 0.5)), width: 1, style: LC.LineStyle.Dashed, labelBackgroundColor: tok('--bg-3', '#161d2e') },
     },
     ...extra,
   };
@@ -67,7 +67,8 @@ function chartUnavailable(el) {
   el.innerHTML = '<div class="chart-offline">chart library unavailable — check network and reload</div>';
   return {
     update() {}, setData() {}, dispose() { el.innerHTML = ''; }, crosshairReadout() {}, chart: null,
-    setMarkers() {}, hover() {}, priceToY() { return null; },
+    setGhost() {}, showGhost() {},
+    setMarkers() {}, hover() {}, click() {}, showTime() {}, timeToX() { return null; }, priceToY() { return null; },
   };
 }
 
@@ -96,6 +97,17 @@ export function candleChart(el) {
     priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
   });
   candles.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.26 } });
+
+  // The real market, for comparison (the eye button): grey see-through candles drawn ON TOP of the simulated
+  // ones. Underneath they vanished whenever the simulated price stayed on the real one (Backtest mode).
+  const grey = tok('--text-mut', '#787b86');
+  const ghost = chart.addCandlestickSeries({
+    upColor: rgba(grey, 0.06), downColor: rgba(grey, 0.32), borderVisible: true,
+    borderUpColor: rgba(grey, 0.95), borderDownColor: rgba(grey, 0.95),
+    wickUpColor: rgba(grey, 0.95), wickDownColor: rgba(grey, 0.95),
+    priceFormat: { type: 'price', precision: 3, minMove: 0.001 },
+    lastValueVisible: false, priceLineVisible: false, visible: false,
+  });
 
   const vol = chart.addHistogramSeries({
     priceScaleId: 'vol',
@@ -167,6 +179,27 @@ export function candleChart(el) {
         fn({ time: param.time, x: param.point.x, y: param.point.y, close: c ? c.close : null });
       });
     },
+    /** The faded real candles: bars {time, open|o, high|h, low|l, close|c}. */
+    setGhost(bars) {
+      ghost.setData(bars.map(norm).map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+    },
+    showGhost(on) { ghost.applyOptions({ visible: !!on }); },
+    /** fn({time, x, y}|null): a click on a candle (null when the click was off the candles). */
+    click(fn) {
+      chart.subscribeClick((param) => {
+        if (!param || param.time === undefined || !param.point) { fn(null); return; }
+        fn({ time: param.time, x: param.point.x, y: param.point.y });
+      });
+    },
+    /** Scroll (keeping the zoom) so the candle at `time` is in the middle of the chart. */
+    showTime(time) {
+      const ts = chart.timeScale();
+      const r = ts.getVisibleRange();
+      const half = r ? (Number(r.to) - Number(r.from)) / 2 : 3600;
+      try { ts.setVisibleRange({ from: time - half, to: time + half }); } catch { /* time outside the data */ }
+    },
+    /** Pixel x of a candle time (null when it is off screen). */
+    timeToX(time) { return chart.timeScale().timeToCoordinate(time); },
     /** Pixel y of a price on the candle scale (null if off-scale). */
     priceToY(price) { return candles.priceToCoordinate(price); },
     dispose() { chart.remove(); },
