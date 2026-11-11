@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
+<script>/* the saved theme, before the page paints */try{if(localStorage.getItem('chronos.theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
 <title>Chronos</title>
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
@@ -42,6 +43,7 @@
         <button type="button" role="menuitem" data-act="new"><b>New run</b><span>Freeze it here and choose the data for the next run.</span></button>
       </div>
     </div>
+    <button type="button" id="tb-theme" class="tb-theme" aria-label="Dark mode" title="Dark mode"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
     <button type="button" id="tb-pop" class="btn btn-ghost btn-icon" aria-label="Pop out current view data" title="Pop out" hidden></button>
     <span id="tb-conn" class="conn-dot" role="status" aria-label="Engine connection: connecting"></span>
   </div>

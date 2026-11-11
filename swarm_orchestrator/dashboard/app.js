@@ -59,7 +59,31 @@ const el = {
   stop: document.getElementById('tb-stop'),
   stopMenu: document.getElementById('tb-stop-menu'),
   pop: document.getElementById('tb-pop'),
+  theme: document.getElementById('tb-theme'),
 };
+
+/* ============================= LIGHT / DARK ============================= */
+
+const THEME_KEY = 'chronos.theme';
+const SUN = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/>'
+  + '<path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" '
+  + 'stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+const MOON = el.theme.innerHTML;
+const isDark = () => document.documentElement.dataset.theme === 'dark';
+function paintThemeButton() {
+  el.theme.innerHTML = isDark() ? SUN : MOON;
+  el.theme.title = isDark() ? 'Light mode' : 'Dark mode';
+  el.theme.setAttribute('aria-label', el.theme.title);
+}
+el.theme.addEventListener('click', () => {
+  const dark = !isDark();
+  if (dark) document.documentElement.dataset.theme = 'dark';
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light'); } catch { /* not remembered */ }
+  paintThemeButton();
+  rerender();          // charts and the code editor read their colours when they are built
+});
+paintThemeButton();
 
 /* ============================== TOPBAR ================================== */
 
@@ -285,6 +309,15 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
+
+/** Build the current view again (after a theme switch); its data lives in the store, so nothing is lost. */
+async function rerender() {
+  const view = current;
+  if (!view) return;
+  try { if (typeof view.unmount === 'function') view.unmount(); } catch (err) { console.error('[shell] unmount failed', err); }
+  el.center.innerHTML = '';
+  try { await view.mount(el.center, ctx); } catch (err) { console.error(`[shell] mount ${view.id} failed`, err); }
+}
 
 /* ============================== RHS PANEL =============================== */
 

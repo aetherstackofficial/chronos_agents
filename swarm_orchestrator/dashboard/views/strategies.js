@@ -270,7 +270,7 @@ export default {
       this._editor = monaco.editor.create(this._els.editor, {
         value: initial,
         language: 'python',
-        theme: 'vs',
+        theme: document.documentElement.dataset.theme === 'dark' ? 'vs-dark' : 'vs',
         fontSize: 13,
         fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'JetBrains Mono, monospace',
         minimap: { enabled: false },

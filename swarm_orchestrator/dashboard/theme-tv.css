@@ -29,8 +29,10 @@
   --accent:#131722;
   --accent-2:#131722;
   --accent-ink:#ffffff;
+  --accent-hover:#2a2e39;
   --accent-soft:rgba(19,23,34,.06);
   --accent-glow:none;
+  --selection:rgba(19,23,34,.14);
 
   --up:#089981;   --up-soft:rgba(8,153,129,.12);   --up-ink:#ffffff;
   --down:#f23645; --down-soft:rgba(242,54,69,.12); --down-ink:#ffffff;
@@ -52,10 +54,46 @@
   --topbar-h:46px;
 }
 
+/* Dark: TradingView's dark palette, still without blue: actions and selections are light grey on charcoal. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-0:#0c0e15;
+  --bg-1:#131722;
+  --bg-2:#1e222d;
+  --bg-3:#2a2e39;
+  --bg-glass:rgba(30,34,45,.97);
+  --scrim:rgba(0,0,0,.6);
+
+  --border:#2a2e39;
+  --border-strong:#363a45;
+  --border-accent:#d1d4dc33;
+
+  --text-hi:#d1d4dc;
+  --text:#b2b5be;
+  --text-mut:#787b86;
+  --text-dim:#5d606b;
+
+  --accent:#d1d4dc;
+  --accent-2:#d1d4dc;
+  --accent-ink:#131722;
+  --accent-hover:#ffffff;
+  --accent-soft:rgba(209,212,220,.08);
+  --selection:rgba(209,212,220,.2);
+
+  --up:#089981;   --up-soft:rgba(8,153,129,.18);
+  --down:#f23645; --down-soft:rgba(242,54,69,.18);
+  --warn:#ff9800; --warn-soft:rgba(255,152,0,.15);
+  --info:#b2b5be; --reactive:#b2b5be;
+  --crosshair:#758696;
+
+  --sh-2:0 4px 12px rgba(0,0,0,.4);
+  --sh-3:0 8px 24px rgba(0,0,0,.55);
+}
+
 body{background:var(--bg-0);font-variant-numeric:tabular-nums}
 /* .btn / .chip / .panel set display:flex, which beat the hidden attribute (hidden buttons and empty chips showed) */
 [hidden]{display:none!important}
-::selection{background:rgba(19,23,34,.14)}
+::selection{background:var(--selection)}
 :focus-visible{outline:2px solid var(--accent)}
 
 /* Prices and quantities: the UI font with equal-width digits, like TradingView. Code keeps the monospace. */
@@ -70,9 +108,9 @@ code,pre,.logs-pre,textarea.code,textarea.input.code{font-family:var(--mono)}
   color:var(--text-hi);transition:background var(--dur-1) var(--ease),border-color var(--dur-1) var(--ease)}
 .btn:hover{background:var(--bg-3)}
 .btn:active{transform:none}
-.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:none}
-.btn-primary:hover{background:#2a2e39;border-color:#2a2e39}
-.btn-accent{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);box-shadow:none}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn-up{background:var(--up);border-color:var(--up);color:#fff}
 .btn-down{background:var(--down);border-color:var(--down);color:#fff}
 .btn-warn{background:var(--warn);border-color:var(--warn);color:#000}
@@ -180,3 +218,12 @@ a.brand .brand-name,a.logo .brand-name{font-family:'Montserrat',var(--font);font
 .nav-rail.rail .nav-items{padding:6px 4px;display:flex;flex-direction:column;gap:2px}
 .nav-rail.rail .nav-item{padding:8px 0}
 .nav-rail.rail .nav-item.active::before{left:-4px}
+
+/* ---- top bar: the theme switch; no connection dot (the "Connection lost" banner already says it) ---- */
+.conn-dot{display:none!important}
+.tb-theme{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;
+  border-radius:var(--r-md);color:var(--text-mut)}
+.tb-theme:hover{color:var(--text-hi);background:var(--bg-3)}
+.tb-theme:focus-visible{outline:2px solid var(--accent)}
+.tb-theme svg{width:17px;height:17px}
+#tb-pop{display:none!important}          /* the topbar's pop-out button: not wanted */

@@ -766,9 +766,10 @@ export default {
       if (real.busy || !rid || document.hidden) return;
       real.busy = true;
       try {
-        const r = await ctx.api.real(real.on ? real.count : 1e9, real.sim);
+        const wantReal = real.on;            // the eye as it was when asking (it may be switched while we wait)
+        const r = await ctx.api.real(wantReal ? real.count : 1e9, real.sim);
         if (r.run_id !== rid) return;
-        if (real.on) {
+        if (wantReal && real.on) {
           if (r.count < real.count) { real.bars = []; real.count = 0; return; }   // a new run: next pull starts over
           for (const b of r.bars || []) real.bars.push({ time: b.time, open: b.o, high: b.h, low: b.l, close: b.c, volume: b.v });
           real.count = r.count;
